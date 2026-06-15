@@ -1,0 +1,44 @@
+services:
+
+  # ─── Banco de dados PostgreSQL (dev) ────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sports_news_db_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-sports_news}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── API com hot reload ─────────────────────────────────────
+  api:
+    image: node:20-alpine
+    container_name: sports_news_api_dev
+    working_dir: /app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sports_news}
+      NODE_ENV: development
+    volumes:
+      - .:/app                        # monta o código local dentro do container
+      - /app/node_modules             # preserva o node_modules do container
+    command: sh -c "npm install && npx prisma migrate dev --name init && npm run dev"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data_dev:
