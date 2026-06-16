@@ -1,15 +1,9 @@
 // src/modules/banners/banners.routes.ts
 import type { FastifyInstance } from 'fastify';
-import { BannerService } from './banners.service';
-import { BannerController } from './banners.controller';
+import { bannerController } from '../../shared/container';
 import { createBannerSchema, updateBannerSchema } from './banners.schema';
-import { BannerRepository } from './banners.repository';
 import { requirePermission } from '../../shared/plugins/permissions.plugin';
 import { createUploadHandler } from '../../shared/plugins/upload.plugin';
-
-const bannerRepo = new BannerRepository();
-const bannerService = new BannerService(bannerRepo);
-const bannerController = new BannerController(bannerService);
 
 const uploadBanner = createUploadHandler('banners');
 

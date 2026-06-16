@@ -1,11 +1,11 @@
 // src/modules/dashboard/dashboard.service.ts
-import type { IArticleRepository } from '../articles/articles.repository.interface';
+import type { IArticleAdminRepository } from '../articles/repositories/article-admin.repository.interface';
 import type { IUserRepository } from '../users/users.repository';
 import type { ICategoryRepository } from '../categories/categories.repository';
 
 export class DashboardService {
   constructor(
-    private readonly articleRepo: IArticleRepository,
+    private readonly articleRepo: IArticleAdminRepository,
     private readonly userRepo: IUserRepository,
     private readonly categoryRepo: ICategoryRepository,
   ) { }

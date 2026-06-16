@@ -56,7 +56,7 @@ export async function buildApp() {
     errorResponseBuilder: () => ({ error: 'Muitas requisições, tente novamente em 15 minutos.' }),
   });
 
-  await app.register(async (instance) => {
+  await app.register(async (instance: FastifyInstance) => {
     await instance.register(rateLimit, {
       max: 10,
       timeWindow: '15 minutes',
