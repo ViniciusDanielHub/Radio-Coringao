@@ -3,6 +3,7 @@ import { prisma } from '../../shared/database/prisma';
 import type { MenuItem } from '../../shared/entities';
 
 export interface IMenuRepository {
+  findById(id: string): Promise<MenuItem | null>;
   getPublic(): Promise<MenuItem[]>;
   getAdmin(): Promise<MenuItem[]>;
   create(data: Omit<MenuItem, 'id' | 'createdAt'>): Promise<MenuItem>;
@@ -12,11 +13,17 @@ export interface IMenuRepository {
 }
 
 export class MenuRepository implements IMenuRepository {
+  async findById(id: string): Promise<MenuItem | null> {
+    return prisma.menuItem.findUnique({ where: { id } }) as Promise<MenuItem | null>;
+  }
+
   async getPublic(): Promise<MenuItem[]> {
     return prisma.menuItem.findMany({
       where: { isActive: true, parentId: null },
       orderBy: { order: 'asc' },
-      include: { children: { where: { isActive: true }, orderBy: { order: 'asc' } } },
+      include: {
+        children: { where: { isActive: true }, orderBy: { order: 'asc' } },
+      },
     }) as unknown as Promise<MenuItem[]>;
   }
 
@@ -24,7 +31,9 @@ export class MenuRepository implements IMenuRepository {
     return prisma.menuItem.findMany({
       where: { parentId: null },
       orderBy: { order: 'asc' },
-      include: { children: { orderBy: { order: 'asc' } } },
+      include: {
+        children: { orderBy: { order: 'asc' } },
+      },
     }) as unknown as Promise<MenuItem[]>;
   }
 

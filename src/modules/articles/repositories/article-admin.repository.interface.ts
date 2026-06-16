@@ -9,6 +9,7 @@ export interface IArticleAdminRepository {
   listAdmin(filter: ListAdminArticlesFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
   searchAdmin(filter: SearchAdminFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
   slugExists(slug: string, excludeId?: string): Promise<boolean>;
+  categoryExists(categoryId: string): Promise<boolean>;
 
   // escrita
   create(data: Partial<Article> & { tagNames?: string[] }): Promise<Article>;
@@ -21,7 +22,7 @@ export interface IArticleAdminRepository {
   findImage(imageId: string, articleId: string): Promise<ArticleImage | null>;
   deleteImage(imageId: string): Promise<void>;
 
-  // stats (necessário para DashboardService)
+  // stats
   findForDashboard(): Promise<{ topArticles: Partial<Article>[]; recentArticles: Partial<Article>[] }>;
   aggregateStats(): Promise<{
     total: number; published: number; draft: number;

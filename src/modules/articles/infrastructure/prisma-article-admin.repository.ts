@@ -6,10 +6,10 @@ import type { Article, ArticleImage, PaginationParams, PaginatedResult } from '.
 import type { ListAdminArticlesFilter, SearchAdminFilter } from '../articles.types';
 
 const articleInclude = {
-  author:   { select: { id: true, name: true, avatar: true, role: true } },
+  author: { select: { id: true, name: true, avatar: true, role: true } },
   category: { select: { id: true, name: true, slug: true, color: true } },
-  tags:     { include: { tag: { select: { id: true, name: true, slug: true } } } },
-  images:   { orderBy: { order: 'asc' as const } },
+  tags: { include: { tag: { select: { id: true, name: true, slug: true } } } },
+  images: { orderBy: { order: 'asc' as const } },
 } as const;
 
 export class PrismaArticleAdminRepository implements IArticleAdminRepository {
@@ -28,19 +28,28 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
     }) as unknown as Promise<Article | null>;
   }
 
+  // ─── Verifica existência de categoria ────────────────────────
+  async categoryExists(categoryId: string): Promise<boolean> {
+    const cat = await prisma.category.findUnique({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    return !!cat;
+  }
+
   async listAdmin(
     filter: ListAdminArticlesFilter,
     { page, limit }: PaginationParams,
   ): Promise<PaginatedResult<Article>> {
     const where: any = {};
     if (filter.authorId) where.authorId = filter.authorId;
-    if (filter.status)   where.status   = filter.status;
+    if (filter.status) where.status = filter.status;
     if (filter.category) where.category = { slug: filter.category };
-    if (filter.type)     where.type     = filter.type;
-    if (filter.author)   where.authorId = filter.author;
+    if (filter.type) where.type = filter.type;
+    if (filter.author) where.authorId = filter.author;
     if (filter.q) {
       where.OR = [
-        { title:   { contains: filter.q, mode: 'insensitive' } },
+        { title: { contains: filter.q, mode: 'insensitive' } },
         { excerpt: { contains: filter.q, mode: 'insensitive' } },
       ];
     }
@@ -50,7 +59,7 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
       prisma.article.findMany({
         where,
         include: {
-          author:   { select: { id: true, name: true } },
+          author: { select: { id: true, name: true } },
           category: { select: { id: true, name: true, slug: true } },
         },
         skip, take: limit,
@@ -59,7 +68,13 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
       prisma.article.count({ where }),
     ]);
 
-    return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data: data as unknown as Article[],
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async searchAdmin(
@@ -70,20 +85,20 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
       ...(filter.authorId && { authorId: filter.authorId }),
       ...(filter.q && {
         OR: [
-          { title:   { contains: filter.q, mode: 'insensitive' } },
+          { title: { contains: filter.q, mode: 'insensitive' } },
           { excerpt: { contains: filter.q, mode: 'insensitive' } },
           { content: { contains: filter.q, mode: 'insensitive' } },
         ],
       }),
       ...(filter.category && { category: { slug: filter.category } }),
-      ...(filter.tag      && { tags: { some: { tag: { slug: filter.tag } } } }),
-      ...(filter.type     && { type: filter.type }),
-      ...(filter.status   && { status: filter.status }),
-      ...(filter.author   && { author: { name: { contains: filter.author, mode: 'insensitive' } } }),
+      ...(filter.tag && { tags: { some: { tag: { slug: filter.tag } } } }),
+      ...(filter.type && { type: filter.type }),
+      ...(filter.status && { status: filter.status }),
+      ...(filter.author && { author: { name: { contains: filter.author, mode: 'insensitive' } } }),
       ...((filter.dateFrom || filter.dateTo) && {
         publishedAt: {
           ...(filter.dateFrom && { gte: new Date(filter.dateFrom) }),
-          ...(filter.dateTo   && { lte: new Date(filter.dateTo) }),
+          ...(filter.dateTo && { lte: new Date(filter.dateTo) }),
         },
       }),
     };
@@ -101,14 +116,20 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
           coverImage: true, type: true, status: true,
           publishedAt: true, scheduledAt: true, viewCount: true,
           category: { select: { name: true, slug: true, color: true } },
-          author:   { select: { id: true, name: true } },
-          tags:     { select: { tag: { select: { name: true, slug: true } } } },
+          author: { select: { id: true, name: true } },
+          tags: { select: { tag: { select: { name: true, slug: true } } } },
         },
       }),
       prisma.article.count({ where }),
     ]);
 
-    return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data: data as unknown as Article[],
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async create(data: any): Promise<Article> {
@@ -116,7 +137,9 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
     const result = await prisma.article.create({
       data: {
         ...articleData,
-        tags: tagNames?.length ? { create: await this._resolveTagIds(tagNames) } : undefined,
+        tags: tagNames?.length
+          ? { create: await this._resolveTagIds(tagNames) }
+          : undefined,
       },
       include: articleInclude,
     });
@@ -186,7 +209,7 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
         take: 10,
         select: {
           id: true, title: true, status: true, updatedAt: true,
-          author:   { select: { name: true } },
+          author: { select: { name: true } },
           category: { select: { name: true, slug: true } },
         },
       }),
@@ -207,7 +230,14 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
       prisma.article.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
     ]);
 
-    return { total, published, draft, review, totalViews: viewsAgg._sum.viewCount || 0, last30Days };
+    return {
+      total,
+      published,
+      draft,
+      review,
+      totalViews: viewsAgg._sum.viewCount || 0,
+      last30Days,
+    };
   }
 
   // ─── Helper privado ──────────────────────────────────────
@@ -215,8 +245,8 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
     const creates: { tagId: string }[] = [];
     for (const name of tagNames) {
       const slug = createSlug(name);
-      const tag  = await prisma.tag.upsert({
-        where:  { slug },
+      const tag = await prisma.tag.upsert({
+        where: { slug },
         update: {},
         create: { name: name.trim(), slug },
       });
