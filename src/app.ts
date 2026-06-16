@@ -4,13 +4,13 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
+import type { FastifyInstance } from 'fastify';
 
 import { registerErrorHandler } from './shared/plugins/error-handler.plugin';
 import { authenticate } from './shared/plugins/auth.plugin';
 
 import { authRoutes } from './modules/auth/auth.routes';
 import { userRoutes } from './modules/users/users.routes';
-import { articlePublicRoutes, articleAdminRoutes } from './modules/articles/articles.routes';
 import { categoryPublicRoutes, categoryAdminRoutes } from './modules/categories/categories.routes';
 import { tagPublicRoutes, tagAdminRoutes } from './modules/tags/tags.routes';
 import { bannerPublicRoutes, bannerAdminRoutes } from './modules/banners/banners.routes';
@@ -18,15 +18,19 @@ import { menuPublicRoutes, menuAdminRoutes } from './modules/menu/menu.routes';
 import { settingsPublicRoutes, settingsAdminRoutes } from './modules/settings/settings.routes';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes';
 
+// ─── Novos imports separados por public/admin ─────────────────
+import { articlePublicRoutes } from './modules/articles/public/articles-public.routes';
+import { articleAdminRoutes } from './modules/articles/admin/articles-admin.routes';
+
 export async function buildApp() {
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test',
   });
 
-  // ─── Security ──────────────────────────────────────────────
+  // ─── Security ─────────────────────────────────────────────
   await app.register(helmet, { global: true });
 
-  // ─── CORS ──────────────────────────────────────────────────
+  // ─── CORS ─────────────────────────────────────────────────
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3001')
     .split(',')
     .map((o) => o.trim());
@@ -42,7 +46,7 @@ export async function buildApp() {
     credentials: true,
   });
 
-  // ─── Rate limiting ─────────────────────────────────────────
+  // ─── Rate limiting ────────────────────────────────────────
   await app.register(rateLimit, {
     global: true,
     max: 300,
@@ -50,36 +54,35 @@ export async function buildApp() {
     errorResponseBuilder: () => ({ error: 'Muitas requisições, tente novamente em 15 minutos.' }),
   });
 
-  // Auth login gets stricter limit
   await app.register(async (instance) => {
     await instance.register(rateLimit, {
       max: 10,
       timeWindow: '15 minutes',
       errorResponseBuilder: () => ({ error: 'Muitas tentativas de login. Aguarde 15 minutos.' }),
     });
-    instance.post('/api/auth/login', async () => ({})); // placeholder to scope rate-limit
+    instance.post('/api/auth/login', async () => ({}));
   });
 
-  // ─── Multipart (uploads) ───────────────────────────────────
+  // ─── Multipart (uploads) ──────────────────────────────────
   await app.register(multipart, {
     limits: { fileSize: 5 * 1024 * 1024 },
   });
 
-  // ─── Error handling ────────────────────────────────────────
+  // ─── Error handling ───────────────────────────────────────
   registerErrorHandler(app);
 
-  // ─── Health check ──────────────────────────────────────────
+  // ─── Health check ─────────────────────────────────────────
   app.get('/api/health', async () => ({
     status: 'ok',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
   }));
 
-  // ─── Auth routes ────────────────────────────────────────────
+  // ─── Auth ─────────────────────────────────────────────────
   await app.register(authRoutes, { prefix: '/api/auth' });
 
-  // ─── Public routes ──────────────────────────────────────────
-  await app.register(async (instance) => {
+  // ─── Rotas públicas ───────────────────────────────────────
+  await app.register(async (instance: FastifyInstance) => {
     await instance.register(articlePublicRoutes);
     await instance.register(categoryPublicRoutes);
     await instance.register(tagPublicRoutes);
@@ -88,8 +91,8 @@ export async function buildApp() {
     await instance.register(settingsPublicRoutes);
   }, { prefix: '/api' });
 
-  // ─── Admin routes (require authentication) ───────────────────
-  await app.register(async (instance) => {
+  // ─── Rotas admin (requer autenticação) ────────────────────
+  await app.register(async (instance: FastifyInstance) => {
     instance.addHook('preHandler', authenticate);
 
     await instance.register(dashboardRoutes);

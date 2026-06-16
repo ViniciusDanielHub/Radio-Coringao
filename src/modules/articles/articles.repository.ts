@@ -3,7 +3,7 @@ import { prisma } from '../../shared/database/prisma';
 import type { Article, ArticleImage, ArticleStatus, ArticleType, PaginationParams, PaginatedResult } from '../../shared/entities';
 import { createSlug } from '../../shared/services/slugify';
 
-// ─── Contracts ──────────────────────────────────────────────
+// ─── Filtros ─────────────────────────────────────────────────
 export interface ListPublicArticlesFilter {
   category?: string;
   tag?: string;
@@ -22,12 +22,31 @@ export interface ListAdminArticlesFilter {
   q?: string;
 }
 
+export interface SearchPublicFilter {
+  q?: string;
+  category?: string;
+  tag?: string;
+  type?: ArticleType;
+  dateFrom?: string;
+  dateTo?: string;
+  orderBy?: 'recent' | 'popular';
+}
+
+export interface SearchAdminFilter extends SearchPublicFilter {
+  status?: ArticleStatus;
+  author?: string;
+  authorId?: string;
+}
+
+// ─── Contrato ────────────────────────────────────────────────
 export interface IArticleRepository {
   findBySlugPublic(slug: string): Promise<Article | null>;
   findByIdAdmin(id: string, authorId?: string): Promise<Article | null>;
   findById(id: string): Promise<Article | null>;
   listPublic(filter: ListPublicArticlesFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
   listAdmin(filter: ListAdminArticlesFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
+  search(filter: SearchPublicFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
+  searchAdmin(filter: SearchAdminFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
   create(data: Partial<Article> & { tagNames?: string[] }): Promise<Article>;
   update(id: string, data: Partial<Article> & { tagNames?: string[] }): Promise<Article>;
   delete(id: string): Promise<void>;
@@ -35,12 +54,8 @@ export interface IArticleRepository {
   slugExists(slug: string, excludeId?: string): Promise<boolean>;
   findForDashboard(): Promise<{ topArticles: Partial<Article>[]; recentArticles: Partial<Article>[] }>;
   aggregateStats(): Promise<{
-    total: number;
-    published: number;
-    draft: number;
-    review: number;
-    totalViews: number;
-    last30Days: number;
+    total: number; published: number; draft: number;
+    review: number; totalViews: number; last30Days: number;
   }>;
   findFirstImage(articleId: string): Promise<ArticleImage | null>;
   addImage(data: Omit<ArticleImage, 'id' | 'createdAt'>): Promise<ArticleImage>;
@@ -48,7 +63,7 @@ export interface IArticleRepository {
   deleteImage(imageId: string): Promise<void>;
 }
 
-// ─── Implementation ─────────────────────────────────────────
+// ─── Include padrão ──────────────────────────────────────────
 const articleInclude = {
   author: { select: { id: true, name: true, avatar: true, role: true } },
   category: { select: { id: true, name: true, slug: true, color: true } },
@@ -56,6 +71,7 @@ const articleInclude = {
   images: { orderBy: { order: 'asc' } },
 } as const;
 
+// ─── Implementação ───────────────────────────────────────────
 export class ArticleRepository implements IArticleRepository {
   async findBySlugPublic(slug: string): Promise<Article | null> {
     return prisma.article.findFirst({
@@ -135,29 +151,114 @@ export class ArticleRepository implements IArticleRepository {
     return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  async search(filter: SearchPublicFilter, { page, limit }: PaginationParams): Promise<PaginatedResult<Article>> {
+    const where: any = {
+      status: 'PUBLISHED',
+      ...(filter.q && {
+        OR: [
+          { title: { contains: filter.q, mode: 'insensitive' } },
+          { excerpt: { contains: filter.q, mode: 'insensitive' } },
+          { content: { contains: filter.q, mode: 'insensitive' } },
+        ],
+      }),
+      ...(filter.category && { category: { slug: filter.category } }),
+      ...(filter.tag && { tags: { some: { tag: { slug: filter.tag } } } }),
+      ...(filter.type && { type: filter.type }),
+      ...((filter.dateFrom || filter.dateTo) && {
+        publishedAt: {
+          ...(filter.dateFrom && { gte: new Date(filter.dateFrom) }),
+          ...(filter.dateTo && { lte: new Date(filter.dateTo) }),
+        },
+      }),
+    };
+
+    const orderBy = filter.orderBy === 'popular'
+      ? { viewCount: 'desc' as const }
+      : { publishedAt: 'desc' as const };
+
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      prisma.article.findMany({
+        where, orderBy, skip, take: limit,
+        select: {
+          id: true, title: true, slug: true, excerpt: true,
+          coverImage: true, type: true, publishedAt: true, viewCount: true,
+          category: { select: { name: true, slug: true, color: true } },
+          author: { select: { name: true } },
+          tags: { select: { tag: { select: { name: true, slug: true } } } },
+        },
+      }),
+      prisma.article.count({ where }),
+    ]);
+
+    return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async searchAdmin(filter: SearchAdminFilter, { page, limit }: PaginationParams): Promise<PaginatedResult<Article>> {
+    const where: any = {
+      ...(filter.authorId && { authorId: filter.authorId }),
+      ...(filter.q && {
+        OR: [
+          { title: { contains: filter.q, mode: 'insensitive' } },
+          { excerpt: { contains: filter.q, mode: 'insensitive' } },
+          { content: { contains: filter.q, mode: 'insensitive' } },
+        ],
+      }),
+      ...(filter.category && { category: { slug: filter.category } }),
+      ...(filter.tag && { tags: { some: { tag: { slug: filter.tag } } } }),
+      ...(filter.type && { type: filter.type }),
+      ...(filter.status && { status: filter.status }),
+      ...(filter.author && {
+        author: { name: { contains: filter.author, mode: 'insensitive' } },
+      }),
+      ...((filter.dateFrom || filter.dateTo) && {
+        publishedAt: {
+          ...(filter.dateFrom && { gte: new Date(filter.dateFrom) }),
+          ...(filter.dateTo && { lte: new Date(filter.dateTo) }),
+        },
+      }),
+    };
+
+    const orderBy = filter.orderBy === 'popular'
+      ? { viewCount: 'desc' as const }
+      : { publishedAt: 'desc' as const };
+
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      prisma.article.findMany({
+        where, orderBy, skip, take: limit,
+        select: {
+          id: true, title: true, slug: true, excerpt: true,
+          coverImage: true, type: true, status: true,
+          publishedAt: true, scheduledAt: true, viewCount: true,
+          category: { select: { name: true, slug: true, color: true } },
+          author: { select: { id: true, name: true } },
+          tags: { select: { tag: { select: { name: true, slug: true } } } },
+        },
+      }),
+      prisma.article.count({ where }),
+    ]);
+
+    return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
   async create(data: any): Promise<Article> {
     const { tagNames, ...articleData } = data;
-
     const result = await prisma.article.create({
       data: {
         ...articleData,
-        tags: tagNames?.length
-          ? { create: await this._resolveTagIds(tagNames) }
-          : undefined,
+        tags: tagNames?.length ? { create: await this._resolveTagIds(tagNames) } : undefined,
       },
       include: articleInclude,
     });
-
     return result as unknown as Article;
   }
 
   async update(id: string, data: any): Promise<Article> {
     const { tagNames, ...articleData } = data;
-
     if (tagNames !== undefined) {
       await prisma.articleTag.deleteMany({ where: { articleId: id } });
     }
-
     const result = await prisma.article.update({
       where: { id },
       data: {
@@ -166,7 +267,6 @@ export class ArticleRepository implements IArticleRepository {
       },
       include: articleInclude,
     });
-
     return result as unknown as Article;
   }
 
@@ -189,19 +289,18 @@ export class ArticleRepository implements IArticleRepository {
       prisma.article.findMany({
         orderBy: { updatedAt: 'desc' },
         take: 10,
-        include: {
+        select: {
+          id: true, title: true, status: true, updatedAt: true,
           author: { select: { name: true } },
           category: { select: { name: true, slug: true } },
         },
-        select: { id: true, title: true, status: true, updatedAt: true, author: true, category: true },
       }),
     ]);
     return { topArticles, recentArticles };
   }
 
   async aggregateStats() {
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now);
+    const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const [total, published, draft, review, viewsAgg, last30Days] = await Promise.all([
@@ -213,11 +312,7 @@ export class ArticleRepository implements IArticleRepository {
       prisma.article.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
     ]);
 
-    return {
-      total, published, draft, review,
-      totalViews: viewsAgg._sum.viewCount || 0,
-      last30Days,
-    };
+    return { total, published, draft, review, totalViews: viewsAgg._sum.viewCount || 0, last30Days };
   }
 
   async slugExists(slug: string, excludeId?: string): Promise<boolean> {
