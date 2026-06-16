@@ -9,3 +9,14 @@ export const updateArticleStatusSchema = {
     },
   },
 } as const;
+
+export const trendingQuerySchema = {
+  querystring: {
+    type: 'object',
+    properties: {
+      limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 },
+      days: { type: 'integer', minimum: 1, maximum: 365, default: 7 },
+      category: { type: 'string' },
+    },
+  },
+} as const;
