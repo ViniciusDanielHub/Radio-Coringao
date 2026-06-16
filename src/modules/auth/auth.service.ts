@@ -1,4 +1,3 @@
-// src/modules/auth/auth.service.ts
 import bcrypt from 'bcryptjs';
 import type { IUserRepository } from '../users/users.repository';
 import type { IRefreshTokenRepository } from './auth.repository';
@@ -21,7 +20,6 @@ export class AuthService {
       throw new ValidationError(ErrorCode.VALIDATION_REQUIRED_FIELD, { field: 'password' });
     }
 
-    // Sempre busca pelo e-mail normalizado
     const user = await this.userRepo.findByEmail(email.trim().toLowerCase());
 
     // Mesmo erro para e-mail não encontrado e senha errada (evita enumeração)
@@ -72,7 +70,6 @@ export class AuthService {
       throw new UnauthorizedError(ErrorCode.AUTH_REFRESH_INVALID);
     }
     if (stored.expiresAt < new Date()) {
-      // Remove token expirado
       await this.tokenRepo.deleteByToken(refreshToken).catch(() => { });
       throw new UnauthorizedError(ErrorCode.AUTH_REFRESH_EXPIRED);
     }
@@ -80,12 +77,23 @@ export class AuthService {
       throw new UnauthorizedError(ErrorCode.AUTH_USER_INACTIVE);
     }
 
-    const accessToken = this.jwtService.generateAccessToken({
-      id: stored.user.id,
-      role: stored.user.role,
+    // ── ROTAÇÃO: invalida o token antigo antes de emitir o novo ──
+    // Se deleteByToken falhar (ex: race condition), lançamos 401 para
+    // forçar novo login — preferível a emitir um token duplicado.
+    await this.tokenRepo.deleteByToken(refreshToken);
+
+    const newPayload = { id: stored.user.id, role: stored.user.role };
+    const newAccessToken = this.jwtService.generateAccessToken(newPayload);
+    const newRefreshToken = this.jwtService.generateRefreshToken(newPayload);
+
+    await this.tokenRepo.create({
+      token: newRefreshToken,
+      userId: stored.user.id,
+      expiresAt: this.jwtService.getRefreshExpiryDate(),
     });
 
-    return { accessToken };
+    // Retorna o novo par. O cliente DEVE substituir o refresh token armazenado.
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
   async logout(refreshToken?: string) {

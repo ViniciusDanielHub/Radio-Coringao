@@ -1,27 +1,16 @@
-// src/modules/live-scores/live-scores.service.ts
 import { LIVE_SCORES_CONFIG } from './live-scores.config';
 import { ExternalServiceError, AppError } from '../../shared/errors';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { validateMatchday, validateDateRange, validateMatchStatus } from '../../shared/validators';
+import { getCache } from '../../shared/services/cache';
+import type { ICacheService } from '../../shared/services/cache';
 import type { MatchResult, StandingRow, TopScorer } from './live-scores.types';
 
 const { baseUrl, competition, teams, cache: TTL } = LIVE_SCORES_CONFIG;
 
-interface CacheEntry { data: unknown; expiresAt: number; }
-const cacheStore = new Map<string, CacheEntry>();
-
-function fromCache<T>(key: string): T | null {
-  const entry = cacheStore.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { cacheStore.delete(key); return null; }
-  return entry.data as T;
-}
-function toCache(key: string, data: unknown, ttlMs: number): void {
-  cacheStore.set(key, { data, expiresAt: Date.now() + ttlMs });
-}
-
-async function apiFetch<T>(path: string, ttlMs: number): Promise<T> {
-  const cached = fromCache<T>(path);
+async function apiFetch<T>(path: string, ttlMs: number, cache: ICacheService): Promise<T> {
+  // Tenta ler do cache antes de bater na API
+  const cached = await cache.get<T>(path);
   if (cached) return cached;
 
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
@@ -41,7 +30,7 @@ async function apiFetch<T>(path: string, ttlMs: number): Promise<T> {
   try {
     res = await fetch(`${baseUrl}${path}`, {
       headers: { 'X-Auth-Token': apiKey },
-      signal: AbortSignal.timeout(10_000), // timeout de 10s
+      signal: AbortSignal.timeout(10_000),
     });
   } catch (err: any) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
@@ -96,11 +85,16 @@ async function apiFetch<T>(path: string, ttlMs: number): Promise<T> {
     });
   }
 
-  toCache(path, data, ttlMs);
+  // Persiste no cache (in-memory ou Redis)
+  await cache.set(path, data, ttlMs);
   return data;
 }
 
 export class LiveScoresService {
+  // Cache é lazy-loaded — usa o singleton configurado em getCache()
+  private get cache(): ICacheService {
+    return getCache();
+  }
 
   async getMatches(options: {
     matchday?: number;
@@ -109,32 +103,25 @@ export class LiveScoresService {
     dateTo?: string;
   } = {}): Promise<{ matches: MatchResult[]; competition: unknown }> {
 
-    // Validações de entrada
-    if (options.matchday !== undefined) {
-      validateMatchday(options.matchday);
-    }
-    if (options.status) {
-      validateMatchStatus(options.status);
-    }
-    if (options.dateFrom || options.dateTo) {
-      validateDateRange(options.dateFrom, options.dateTo);
-    }
+    if (options.matchday !== undefined) validateMatchday(options.matchday);
+    if (options.status) validateMatchStatus(options.status);
+    if (options.dateFrom || options.dateTo) validateDateRange(options.dateFrom, options.dateTo);
 
     const params = new URLSearchParams();
     if (options.matchday) params.set('matchday', String(options.matchday));
-    if (options.status)   params.set('status', options.status.toUpperCase());
+    if (options.status) params.set('status', options.status.toUpperCase());
     if (options.dateFrom) params.set('dateFrom', options.dateFrom);
-    if (options.dateTo)   params.set('dateTo', options.dateTo);
+    if (options.dateTo) params.set('dateTo', options.dateTo);
 
-    const qs  = params.toString();
+    const qs = params.toString();
     const path = `/competitions/${competition}/matches${qs ? `?${qs}` : ''}`;
-    const ttl  = options.status?.toUpperCase() === 'IN_PLAY' ? TTL.inPlay : TTL.matches;
+    const ttl = options.status?.toUpperCase() === 'IN_PLAY' ? TTL.inPlay : TTL.matches;
 
-    return apiFetch(path, ttl);
+    return apiFetch(path, ttl, this.cache);
   }
 
   async getStandings(): Promise<{ standings: { type: string; table: StandingRow[] }[] }> {
-    return apiFetch(`/competitions/${competition}/standings`, TTL.standings);
+    return apiFetch(`/competitions/${competition}/standings`, TTL.standings, this.cache);
   }
 
   async getTopScorers(limit = 10): Promise<{ scorers: TopScorer[] }> {
@@ -146,7 +133,7 @@ export class LiveScoresService {
         { received: limit, hint: 'Informe um valor entre 1 e 100.' },
       );
     }
-    return apiFetch(`/competitions/${competition}/scorers?limit=${limit}`, TTL.scorers);
+    return apiFetch(`/competitions/${competition}/scorers?limit=${limit}`, TTL.scorers, this.cache);
   }
 
   async getTeamMatches(
@@ -161,16 +148,14 @@ export class LiveScoresService {
         { teamId, hint: 'O ID do time deve ser um inteiro positivo.' },
       );
     }
-    if (options.status) {
-      validateMatchStatus(options.status);
-    }
+    if (options.status) validateMatchStatus(options.status);
 
     const params = new URLSearchParams();
     if (options.status) params.set('status', options.status.toUpperCase());
     params.set('competitions', competition);
     params.set('limit', String(Math.min(options.limit ?? 10, 100)));
 
-    return apiFetch(`/teams/${teamId}/matches?${params}`, TTL.matches);
+    return apiFetch(`/teams/${teamId}/matches?${params}`, TTL.matches, this.cache);
   }
 
   async getTeamSquad(teamId: number): Promise<unknown> {
@@ -182,11 +167,11 @@ export class LiveScoresService {
         { teamId },
       );
     }
-    return apiFetch(`/teams/${teamId}`, TTL.squad);
+    return apiFetch(`/teams/${teamId}`, TTL.squad, this.cache);
   }
 
   async getCompetitionInfo(): Promise<unknown> {
-    return apiFetch(`/competitions/${competition}`, TTL.competition);
+    return apiFetch(`/competitions/${competition}`, TTL.competition, this.cache);
   }
 
   async getCorinthiansWidget(): Promise<{
@@ -203,7 +188,7 @@ export class LiveScoresService {
       this.getStandings(),
     ]);
 
-    const table   = standingsRes.standings.find((s) => s.type === 'TOTAL')?.table ?? [];
+    const table = standingsRes.standings.find((s) => s.type === 'TOTAL')?.table ?? [];
     const standing = table.find((row) => row.team.id === corinthiansId) ?? null;
 
     return { team: teamData, nextMatches: nextRes.matches, recentMatches: recentRes.matches, standing };
