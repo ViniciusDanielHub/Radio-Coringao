@@ -22,6 +22,8 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes';
 import { articlePublicRoutes } from './modules/articles/public/articles-public.routes';
 import { articleAdminRoutes } from './modules/articles/admin/articles-admin.routes';
 
+import { liveScoresRoutes } from './modules/live-scores';
+
 export async function buildApp() {
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test',
@@ -89,6 +91,7 @@ export async function buildApp() {
     await instance.register(bannerPublicRoutes);
     await instance.register(menuPublicRoutes);
     await instance.register(settingsPublicRoutes);
+    await instance.register(liveScoresRoutes, { prefix: '/live-scores' });
   }, { prefix: '/api' });
 
   // ─── Rotas admin (requer autenticação) ────────────────────

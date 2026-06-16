@@ -1,67 +1,15 @@
 // src/modules/articles/articles.repository.ts
 import { prisma } from '../../shared/database/prisma';
-import type { Article, ArticleImage, ArticleStatus, ArticleType, PaginationParams, PaginatedResult } from '../../shared/entities';
+import type { Article, ArticleImage, PaginationParams, PaginatedResult } from '../../shared/entities';
 import { createSlug } from '../../shared/services/slugify';
-
-// ─── Filtros ─────────────────────────────────────────────────
-export interface ListPublicArticlesFilter {
-  category?: string;
-  tag?: string;
-  type?: ArticleType;
-  featured?: boolean;
-  breaking?: boolean;
-  q?: string;
-}
-
-export interface ListAdminArticlesFilter {
-  authorId?: string;
-  status?: ArticleStatus;
-  category?: string;
-  type?: ArticleType;
-  author?: string;
-  q?: string;
-}
-
-export interface SearchPublicFilter {
-  q?: string;
-  category?: string;
-  tag?: string;
-  type?: ArticleType;
-  dateFrom?: string;
-  dateTo?: string;
-  orderBy?: 'recent' | 'popular';
-}
-
-export interface SearchAdminFilter extends SearchPublicFilter {
-  status?: ArticleStatus;
-  author?: string;
-  authorId?: string;
-}
-
-// ─── Contrato ────────────────────────────────────────────────
-export interface IArticleRepository {
-  findBySlugPublic(slug: string): Promise<Article | null>;
-  findByIdAdmin(id: string, authorId?: string): Promise<Article | null>;
-  findById(id: string): Promise<Article | null>;
-  listPublic(filter: ListPublicArticlesFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
-  listAdmin(filter: ListAdminArticlesFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
-  search(filter: SearchPublicFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
-  searchAdmin(filter: SearchAdminFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
-  create(data: Partial<Article> & { tagNames?: string[] }): Promise<Article>;
-  update(id: string, data: Partial<Article> & { tagNames?: string[] }): Promise<Article>;
-  delete(id: string): Promise<void>;
-  incrementViewCount(id: string): Promise<void>;
-  slugExists(slug: string, excludeId?: string): Promise<boolean>;
-  findForDashboard(): Promise<{ topArticles: Partial<Article>[]; recentArticles: Partial<Article>[] }>;
-  aggregateStats(): Promise<{
-    total: number; published: number; draft: number;
-    review: number; totalViews: number; last30Days: number;
-  }>;
-  findFirstImage(articleId: string): Promise<ArticleImage | null>;
-  addImage(data: Omit<ArticleImage, 'id' | 'createdAt'>): Promise<ArticleImage>;
-  findImage(imageId: string, articleId: string): Promise<ArticleImage | null>;
-  deleteImage(imageId: string): Promise<void>;
-}
+import type {
+  ListPublicArticlesFilter,
+  ListAdminArticlesFilter,
+  SearchPublicFilter,
+  SearchAdminFilter,
+  TrendingFilter,
+} from './articles.types';
+import type { IArticleRepository } from './articles.repository.interface';
 
 // ─── Include padrão ──────────────────────────────────────────
 const articleInclude = {
@@ -73,6 +21,7 @@ const articleInclude = {
 
 // ─── Implementação ───────────────────────────────────────────
 export class ArticleRepository implements IArticleRepository {
+
   async findBySlugPublic(slug: string): Promise<Article | null> {
     return prisma.article.findFirst({
       where: { slug, status: 'PUBLISHED' },
@@ -240,6 +189,38 @@ export class ArticleRepository implements IArticleRepository {
     ]);
 
     return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async findTrending(filter: TrendingFilter): Promise<Partial<Article>[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - (filter.days ?? 7));
+
+    const where: any = {
+      status: 'PUBLISHED',
+      publishedAt: { gte: since },
+    };
+
+    if (filter.categorySlug) {
+      where.category = { slug: filter.categorySlug };
+    }
+
+    return prisma.article.findMany({
+      where,
+      orderBy: { viewCount: 'desc' },
+      take: filter.limit ?? 10,
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        excerpt: true,
+        coverImage: true,
+        viewCount: true,
+        publishedAt: true,
+        category: { select: { name: true, slug: true, color: true } },
+        author: { select: { name: true, avatar: true } },
+        tags: { select: { tag: { select: { name: true, slug: true } } } },
+      },
+    }) as unknown as Promise<Partial<Article>[]>;
   }
 
   async create(data: any): Promise<Article> {
