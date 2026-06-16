@@ -1,5 +1,5 @@
 // src/modules/articles/admin/articles-admin.service.ts
-import type { IArticleRepository, SearchAdminFilter } from '../articles.repository';
+import type { IArticleAdminRepository } from './articles-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
 import { NotFoundError, AppError, ForbiddenError } from '../../../shared/errors';
 import { deleteImage } from '../../../shared/services/cloudinary';
@@ -10,9 +10,10 @@ import {
   CAN_EDIT_ANY_ROLES,
   OWN_ARTICLES_ONLY_ROLES,
 } from '../../../shared/plugins/permissions.plugin';
+import type { SearchAdminFilter } from '../articles.types';
 
 export class ArticleAdminService {
-  constructor(private readonly repo: IArticleRepository) { }
+  constructor(private readonly repo: IArticleAdminRepository) { }
 
   // ─── Helpers de permissão ─────────────────────────────────
   private canPublish(role: Role): boolean {

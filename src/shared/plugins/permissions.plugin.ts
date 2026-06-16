@@ -82,6 +82,28 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'articles:submit',
     'dashboard:view',
   ],
+
+  SOCIAL_MEDIA: [
+    'dashboard:view',
+    'articles:create',
+    'articles:edit_own',
+    'articles:submit',
+    'banners:manage',
+  ],
+
+  MODERADOR: [
+    'dashboard:view',
+    'articles:edit_any',
+    'articles:archive',
+    'tags:delete',
+  ],
+
+  SEO_MANAGER: [
+    'dashboard:view',
+    'articles:edit_any',
+    'categories:manage',
+    'tags:delete',
+  ],
 };
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -89,27 +111,27 @@ export function hasPermission(role: Role, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }
 
-  export function requirePermission(permission: Permission) {
-    return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      const role = request.user?.role;
-      if (!role || !hasPermission(role, permission)) {
-        reply.code(403).send({
-          error: 'Acesso negado. Você não tem permissão para esta ação.',
-          required: permission,
-          yourRole: role ?? 'unknown',
-        });
-      }
-    };
-  }
+export function requirePermission(permission: Permission) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const role = request.user?.role;
+    if (!role || !hasPermission(role, permission)) {
+      reply.code(403).send({
+        error: 'Acesso negado. Você não tem permissão para esta ação.',
+        required: permission,
+        yourRole: role ?? 'unknown',
+      });
+    }
+  };
+}
 
-  export function authorize(...roles: Role[]) {
-    return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      if (!roles.includes(request.user?.role)) {
-        reply.code(403).send({ error: 'Acesso negado. Você não tem permissão para esta ação.' });
-      }
-    };
+export function authorize(...roles: Role[]) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!roles.includes(request.user?.role)) {
+      reply.code(403).send({ error: 'Acesso negado. Você não tem permissão para esta ação.' });
+    }
+  };
 }
 
 export const CAN_PUBLISH_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR'];
-export const CAN_EDIT_ANY_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR'];
-export const OWN_ARTICLES_ONLY_ROLES: Role[] = ['JORNALISTA', 'COLUNISTA'];
+export const CAN_EDIT_ANY_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR', 'MODERADOR', 'SEO_MANAGER'];
+export const OWN_ARTICLES_ONLY_ROLES: Role[] = ['JORNALISTA', 'COLUNISTA', 'SOCIAL_MEDIA'];

@@ -26,7 +26,7 @@ export async function articleAdminRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch(
     '/articles/:id',
-    { preHandler: [uploadArticle] },
+    { preHandler: [requirePermission('articles:edit_own'), uploadArticle] },
     controller.update,
   );
 
@@ -42,8 +42,11 @@ export async function articleAdminRoutes(app: FastifyInstance): Promise<void> {
     controller.delete,
   );
 
-  app.post('/articles/:id/images', { preHandler: [uploadArticle] }, controller.addImage);
+  app.post(
+    '/articles/:id/images',
+    { preHandler: [uploadArticle] },
+    controller.addImage,
+  );
+
   app.delete('/articles/:id/images/:imageId', controller.deleteImage);
 }
-
-export { repo as articleRepo };

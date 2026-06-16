@@ -1,6 +1,7 @@
 // src/modules/articles/public/articles-public.service.ts
-import type { IArticleRepository, SearchPublicFilter } from '../articles.repository';
+import type { IArticleRepository } from '../articles.repository.interface';
 import type { ArticleType } from '../../../shared/entities';
+import type { SearchPublicFilter } from '../articles.types';
 import { NotFoundError } from '../../../shared/errors';
 
 export class ArticlePublicService {

@@ -9,7 +9,7 @@ import type {
   SearchAdminFilter,
   TrendingFilter,
 } from './articles.types';
-import type { IArticleRepository } from './articles.repository.interface';
+import type { IArticleAdminRepository } from './admin/articles-admin.repository.interface';
 
 // ─── Include padrão ──────────────────────────────────────────
 const articleInclude = {
@@ -20,18 +20,12 @@ const articleInclude = {
 } as const;
 
 // ─── Implementação ───────────────────────────────────────────
-export class ArticleRepository implements IArticleRepository {
+export class ArticleRepository implements IArticleAdminRepository {
 
+  // ─── Público ─────────────────────────────────────────────
   async findBySlugPublic(slug: string): Promise<Article | null> {
     return prisma.article.findFirst({
       where: { slug, status: 'PUBLISHED' },
-      include: articleInclude,
-    }) as unknown as Promise<Article | null>;
-  }
-
-  async findByIdAdmin(id: string, authorId?: string): Promise<Article | null> {
-    return prisma.article.findFirst({
-      where: { id, ...(authorId ? { authorId } : {}) },
       include: articleInclude,
     }) as unknown as Promise<Article | null>;
   }
@@ -62,37 +56,6 @@ export class ArticleRepository implements IArticleRepository {
       prisma.article.findMany({
         where, include: articleInclude, skip, take: limit,
         orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }],
-      }),
-      prisma.article.count({ where }),
-    ]);
-
-    return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
-  }
-
-  async listAdmin(filter: ListAdminArticlesFilter, { page, limit }: PaginationParams): Promise<PaginatedResult<Article>> {
-    const where: any = {};
-    if (filter.authorId) where.authorId = filter.authorId;
-    if (filter.status) where.status = filter.status;
-    if (filter.category) where.category = { slug: filter.category };
-    if (filter.type) where.type = filter.type;
-    if (filter.author) where.authorId = filter.author;
-    if (filter.q) {
-      where.OR = [
-        { title: { contains: filter.q, mode: 'insensitive' } },
-        { excerpt: { contains: filter.q, mode: 'insensitive' } },
-      ];
-    }
-
-    const skip = (page - 1) * limit;
-    const [data, total] = await Promise.all([
-      prisma.article.findMany({
-        where,
-        include: {
-          author: { select: { id: true, name: true } },
-          category: { select: { id: true, name: true, slug: true } },
-        },
-        skip, take: limit,
-        orderBy: { updatedAt: 'desc' },
       }),
       prisma.article.count({ where }),
     ]);
@@ -136,6 +99,69 @@ export class ArticleRepository implements IArticleRepository {
           author: { select: { name: true } },
           tags: { select: { tag: { select: { name: true, slug: true } } } },
         },
+      }),
+      prisma.article.count({ where }),
+    ]);
+
+    return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async findTrending(filter: TrendingFilter): Promise<Partial<Article>[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - (filter.days ?? 7));
+
+    const where: any = {
+      status: 'PUBLISHED',
+      publishedAt: { gte: since },
+      ...(filter.categorySlug && { category: { slug: filter.categorySlug } }),
+    };
+
+    return prisma.article.findMany({
+      where,
+      orderBy: { viewCount: 'desc' },
+      take: filter.limit ?? 10,
+      select: {
+        id: true, title: true, slug: true, excerpt: true,
+        coverImage: true, viewCount: true, publishedAt: true,
+        category: { select: { name: true, slug: true, color: true } },
+        author: { select: { name: true, avatar: true } },
+        tags: { select: { tag: { select: { name: true, slug: true } } } },
+      },
+    }) as unknown as Promise<Partial<Article>[]>;
+  }
+
+  // ─── Admin ───────────────────────────────────────────────
+  async findByIdAdmin(id: string, authorId?: string): Promise<Article | null> {
+    return prisma.article.findFirst({
+      where: { id, ...(authorId ? { authorId } : {}) },
+      include: articleInclude,
+    }) as unknown as Promise<Article | null>;
+  }
+
+  async listAdmin(filter: ListAdminArticlesFilter, { page, limit }: PaginationParams): Promise<PaginatedResult<Article>> {
+    const where: any = {};
+    if (filter.authorId) where.authorId = filter.authorId;
+    if (filter.status) where.status = filter.status;
+    if (filter.category) where.category = { slug: filter.category };
+    if (filter.type) where.type = filter.type;
+    if (filter.author) where.authorId = filter.author;
+    if (filter.q) {
+      where.OR = [
+        { title: { contains: filter.q, mode: 'insensitive' } },
+        { excerpt: { contains: filter.q, mode: 'insensitive' } },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      prisma.article.findMany({
+        where,
+        include: {
+          author: { select: { id: true, name: true } },
+          category: { select: { id: true, name: true, slug: true } },
+        },
+        skip, take: limit,
+        orderBy: { updatedAt: 'desc' },
       }),
       prisma.article.count({ where }),
     ]);
@@ -191,38 +217,7 @@ export class ArticleRepository implements IArticleRepository {
     return { data: data as unknown as Article[], total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findTrending(filter: TrendingFilter): Promise<Partial<Article>[]> {
-    const since = new Date();
-    since.setDate(since.getDate() - (filter.days ?? 7));
-
-    const where: any = {
-      status: 'PUBLISHED',
-      publishedAt: { gte: since },
-    };
-
-    if (filter.categorySlug) {
-      where.category = { slug: filter.categorySlug };
-    }
-
-    return prisma.article.findMany({
-      where,
-      orderBy: { viewCount: 'desc' },
-      take: filter.limit ?? 10,
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        excerpt: true,
-        coverImage: true,
-        viewCount: true,
-        publishedAt: true,
-        category: { select: { name: true, slug: true, color: true } },
-        author: { select: { name: true, avatar: true } },
-        tags: { select: { tag: { select: { name: true, slug: true } } } },
-      },
-    }) as unknown as Promise<Partial<Article>[]>;
-  }
-
+  // ─── Escrita ─────────────────────────────────────────────
   async create(data: any): Promise<Article> {
     const { tagNames, ...articleData } = data;
     const result = await prisma.article.create({
@@ -259,6 +254,14 @@ export class ArticleRepository implements IArticleRepository {
     await prisma.article.update({ where: { id }, data: { viewCount: { increment: 1 } } });
   }
 
+  async slugExists(slug: string, excludeId?: string): Promise<boolean> {
+    const item = await prisma.article.findFirst({
+      where: { slug, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    });
+    return !!item;
+  }
+
+  // ─── Dashboard / stats ───────────────────────────────────
   async findForDashboard() {
     const [topArticles, recentArticles] = await Promise.all([
       prisma.article.findMany({
@@ -296,13 +299,7 @@ export class ArticleRepository implements IArticleRepository {
     return { total, published, draft, review, totalViews: viewsAgg._sum.viewCount || 0, last30Days };
   }
 
-  async slugExists(slug: string, excludeId?: string): Promise<boolean> {
-    const item = await prisma.article.findFirst({
-      where: { slug, ...(excludeId ? { id: { not: excludeId } } : {}) },
-    });
-    return !!item;
-  }
-
+  // ─── Galeria ─────────────────────────────────────────────
   async findFirstImage(articleId: string): Promise<ArticleImage | null> {
     return prisma.articleImage.findFirst({
       where: { articleId },
