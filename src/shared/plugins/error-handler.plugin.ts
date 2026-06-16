@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyError } from 'fastify';
 import { AppError, ERROR_MESSAGES } from '../errors';
 import { ErrorCode } from '../errors/error-codes';
-import { captureError } from '../monitoring/sentry';
 
 // ─── Mapeamento de erros Prisma → AppError ────────────────────
 const PRISMA_ERROR_MAP: Record<string, { status: number; code: string }> = {
@@ -36,6 +35,7 @@ const PRISMA_ERROR_MAP: Record<string, { status: number; code: string }> = {
   P1017: { status: 503, code: ErrorCode.DB_CONNECTION_ERROR },
 };
 
+// ─── Formatador de resposta de erro ──────────────────────────
 function buildErrorResponse(
   code: string,
   message: string,
@@ -47,6 +47,7 @@ function buildErrorResponse(
   return base;
 }
 
+// ─── Enriquece mensagem de violação única do Prisma ──────────
 function enrichUniqueMessage(meta: any): string {
   if (!meta?.target) return ERROR_MESSAGES[ErrorCode.DB_UNIQUE_VIOLATION];
 
@@ -64,19 +65,25 @@ function enrichUniqueMessage(meta: any): string {
     refresh_tokens_token_key: 'Token inválido.',
   };
 
-  const fields: string[] = Array.isArray(meta.target) ? meta.target : [String(meta.target)];
+  const fields: string[] = Array.isArray(meta.target)
+    ? meta.target
+    : [String(meta.target)];
+
   const key = fields.join('_');
   for (const [k, msg] of Object.entries(fieldMap)) {
     if (key.toLowerCase().includes(k.toLowerCase())) return msg;
   }
+
   return `Já existe um registro com o valor informado para: ${fields.join(', ')}.`;
 }
 
 export function registerErrorHandler(app: FastifyInstance): void {
   const isProd = process.env.NODE_ENV === 'production';
 
+  // ─── 404 — Rota não encontrada ────────────────────────────
   app.setNotFoundHandler((request, reply) => {
     const code = ErrorCode.ROUTE_NOT_FOUND;
+    // request.log carrega requestId automaticamente pelo Fastify
     request.log.warn({ method: request.method, url: request.url }, 'Rota não encontrada');
     reply.code(404).send(
       buildErrorResponse(
@@ -88,30 +95,30 @@ export function registerErrorHandler(app: FastifyInstance): void {
     );
   });
 
+  // ─── Handler principal ────────────────────────────────────
   app.setErrorHandler((err: FastifyError & Partial<AppError>, request, reply) => {
+    // request.log é o logger correto aqui: Fastify injeta requestId, method,
+    // url e outros campos de contexto automaticamente em cada requisição.
 
-    // ── 1. AppError (erros de domínio — 4xx) ──
+    // ── 1. AppError (nossos erros de domínio) ──
     if (err instanceof AppError) {
       if (err.statusCode >= 500) {
-        request.log.error({ err, code: err.code, statusCode: err.statusCode }, err.message);
-        // AppErrors 5xx (ex: DB_CONNECTION_ERROR) também vão ao Sentry
-        captureError(err, {
-          code: err.code,
-          statusCode: err.statusCode,
-          requestId: (request as any).id,
-          userId: (request as any).user?.id,
-          method: request.method,
-          url: request.url,
-        });
+        request.log.error(
+          { err, code: err.code, statusCode: err.statusCode },
+          err.message,
+        );
       } else {
-        request.log.warn({ code: err.code, statusCode: err.statusCode, details: err.details }, err.message);
+        request.log.warn(
+          { code: err.code, statusCode: err.statusCode, details: err.details },
+          err.message,
+        );
       }
       return reply.code(err.statusCode).send(
         buildErrorResponse(err.code, err.message, err.details, isProd),
       );
     }
 
-    // ── 2. Erros do Prisma ──
+    // ── 2. Erros do Prisma (P1xxx / P2xxx) ──
     const prismaCode = (err as any).code as string | undefined;
     if (prismaCode && PRISMA_ERROR_MAP[prismaCode]) {
       const mapped = PRISMA_ERROR_MAP[prismaCode];
@@ -121,18 +128,12 @@ export function registerErrorHandler(app: FastifyInstance): void {
         : (ERROR_MESSAGES[mapped.code] ?? 'Erro de banco de dados.');
 
       request.log.warn({ prismaCode, meta, statusCode: mapped.status }, message);
-
-      // Erros de DB 5xx (P2021, P2022, P1xxx) → Sentry
-      if (mapped.status >= 500) {
-        captureError(err, { prismaCode, meta, requestId: (request as any).id });
-      }
-
       return reply.code(mapped.status).send(
         buildErrorResponse(mapped.code, message, isProd ? undefined : meta, isProd),
       );
     }
 
-    // ── 3. JSON inválido ──
+    // ── 3. JSON inválido no body ──
     if (
       err.message?.includes('Unexpected token') ||
       err.message?.includes('Unexpected end of JSON') ||
@@ -140,7 +141,10 @@ export function registerErrorHandler(app: FastifyInstance): void {
     ) {
       request.log.warn({ errMessage: err.message }, 'JSON inválido no body da requisição');
       return reply.code(400).send(
-        buildErrorResponse(ErrorCode.VALIDATION_JSON_INVALID, ERROR_MESSAGES[ErrorCode.VALIDATION_JSON_INVALID]),
+        buildErrorResponse(
+          ErrorCode.VALIDATION_JSON_INVALID,
+          ERROR_MESSAGES[ErrorCode.VALIDATION_JSON_INVALID],
+        ),
       );
     }
 
@@ -148,7 +152,10 @@ export function registerErrorHandler(app: FastifyInstance): void {
     if (err.statusCode === 415) {
       request.log.warn({ contentType: request.headers['content-type'] }, 'Content-Type não suportado');
       return reply.code(415).send(
-        buildErrorResponse(ErrorCode.VALIDATION_BODY_MISSING, 'Content-Type não suportado. Use application/json ou multipart/form-data.'),
+        buildErrorResponse(
+          ErrorCode.VALIDATION_BODY_MISSING,
+          'Content-Type não suportado. Use application/json ou multipart/form-data.',
+        ),
       );
     }
 
@@ -160,13 +167,20 @@ export function registerErrorHandler(app: FastifyInstance): void {
     ) {
       request.log.warn({ errMessage: err.message }, 'Upload excedeu o tamanho máximo');
       return reply.code(413).send(
-        buildErrorResponse(ErrorCode.UPLOAD_TOO_LARGE, ERROR_MESSAGES[ErrorCode.UPLOAD_TOO_LARGE], { maxSizeMb: 5 }, isProd),
+        buildErrorResponse(
+          ErrorCode.UPLOAD_TOO_LARGE,
+          ERROR_MESSAGES[ErrorCode.UPLOAD_TOO_LARGE],
+          { maxSizeMb: 5 },
+          isProd,
+        ),
       );
     }
 
     // ── 6. Rate limit (429) ──
     if (err.statusCode === 429) {
-      const retryAfter = (err as any).date ? Math.ceil(((err as any).date - Date.now()) / 1000) : 900;
+      const retryAfter = (err as any).date
+        ? Math.ceil(((err as any).date - Date.now()) / 1000)
+        : 900;
       request.log.warn({ retryAfterSeconds: retryAfter }, 'Rate limit atingido');
       reply.header('Retry-After', String(retryAfter));
       return reply.code(429).send(
@@ -192,7 +206,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
       );
     }
 
-    // ── 8. Erros de validação AJV ──
+    // ── 8. Erros de validação do schema Fastify/AJV ──
     if ((err as any).validation) {
       const details = (err as any).validation.map((v: any) => ({
         field: v.instancePath?.replace(/^\//, '') || v.params?.missingProperty || 'campo desconhecido',
@@ -202,52 +216,67 @@ export function registerErrorHandler(app: FastifyInstance): void {
 
       request.log.warn({ validationErrors: details }, 'Validação de schema falhou');
       return reply.code(422).send(
-        buildErrorResponse(ErrorCode.VALIDATION_INVALID_FORMAT, 'Dados inválidos. Verifique os campos enviados.', details, isProd),
+        buildErrorResponse(
+          ErrorCode.VALIDATION_INVALID_FORMAT,
+          'Dados inválidos. Verifique os campos enviados.',
+          details,
+          isProd,
+        ),
       );
     }
 
-    // ── 9. Erros JWT ──
+    // ── 9. Erros de JWT ──
     if (err.name === 'JsonWebTokenError' || err.message === 'JsonWebTokenError') {
-      return reply.code(401).send(buildErrorResponse(ErrorCode.AUTH_TOKEN_INVALID, ERROR_MESSAGES[ErrorCode.AUTH_TOKEN_INVALID]));
+      request.log.warn({ errName: err.name }, 'Token JWT inválido');
+      return reply.code(401).send(
+        buildErrorResponse(ErrorCode.AUTH_TOKEN_INVALID, ERROR_MESSAGES[ErrorCode.AUTH_TOKEN_INVALID]),
+      );
     }
     if (err.name === 'TokenExpiredError') {
-      return reply.code(401).send(buildErrorResponse(ErrorCode.AUTH_TOKEN_EXPIRED, ERROR_MESSAGES[ErrorCode.AUTH_TOKEN_EXPIRED]));
+      request.log.warn('Token JWT expirado');
+      return reply.code(401).send(
+        buildErrorResponse(ErrorCode.AUTH_TOKEN_EXPIRED, ERROR_MESSAGES[ErrorCode.AUTH_TOKEN_EXPIRED]),
+      );
     }
     if (err.name === 'NotBeforeError') {
-      return reply.code(401).send(buildErrorResponse(ErrorCode.AUTH_TOKEN_INVALID, 'Token ainda não é válido.'));
+      return reply.code(401).send(
+        buildErrorResponse(ErrorCode.AUTH_TOKEN_INVALID, 'Token ainda não é válido.'),
+      );
     }
 
     // ── 10. Timeout / serviço indisponível ──
     if (err.statusCode === 503 || err.message?.includes('timeout') || err.name === 'TimeoutError') {
       request.log.warn({ errName: err.name, errMessage: err.message }, 'Timeout ou serviço indisponível');
-      return reply.code(503).send(buildErrorResponse(ErrorCode.TIMEOUT, ERROR_MESSAGES[ErrorCode.TIMEOUT]));
+      return reply.code(503).send(
+        buildErrorResponse(ErrorCode.TIMEOUT, ERROR_MESSAGES[ErrorCode.TIMEOUT]),
+      );
     }
 
-    // ── 11. Erros 4xx sem handler específico ──
+    // ── 11. Erros 4xx conhecidos sem handler específico ──
     if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
       request.log.warn({ statusCode: err.statusCode, errMessage: err.message }, 'Erro 4xx sem handler específico');
       return reply.code(err.statusCode).send(
-        buildErrorResponse(ErrorCode.INTERNAL_ERROR, isProd ? ERROR_MESSAGES[ErrorCode.INTERNAL_ERROR] : err.message),
+        buildErrorResponse(
+          ErrorCode.INTERNAL_ERROR,
+          isProd ? ERROR_MESSAGES[ErrorCode.INTERNAL_ERROR] : err.message,
+        ),
       );
     }
 
     // ── 12. Erro interno (500) — fallback ──
-    // Único ponto onde um erro verdadeiramente inesperado pode chegar.
-    // Logado como error + enviado ao Sentry para alerta imediato.
-    request.log.error({ err, statusCode: err.statusCode ?? 500 }, 'Erro interno não tratado');
-
-    captureError(err, {
-      requestId: (request as any).id,
-      userId: (request as any).user?.id,
-      method: request.method,
-      url: request.url,
-      statusCode: err.statusCode ?? 500,
-    });
+    // Este é o único caso onde um 500 inesperado pode escapar de todos os handlers acima.
+    // Logamos com nível error e incluímos stack trace fora de produção.
+    request.log.error(
+      { err, statusCode: err.statusCode ?? 500 },
+      'Erro interno não tratado',
+    );
 
     reply.code(500).send(
       buildErrorResponse(
         ErrorCode.INTERNAL_ERROR,
-        isProd ? ERROR_MESSAGES[ErrorCode.INTERNAL_ERROR] : (err.message || ERROR_MESSAGES[ErrorCode.INTERNAL_ERROR]),
+        isProd
+          ? ERROR_MESSAGES[ErrorCode.INTERNAL_ERROR]
+          : (err.message || ERROR_MESSAGES[ErrorCode.INTERNAL_ERROR]),
         isProd ? undefined : { stack: err.stack },
         isProd,
       ),
@@ -255,6 +284,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
   });
 }
 
+// ─── Tradutor de mensagens AJV para PT-BR ────────────────────
 function translateAjvMessage(v: any): string {
   const kw = v.keyword;
   const p = v.params;
