@@ -1,6 +1,6 @@
 {
   "name": "sports-news-api",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Backend para portal de notícias esportivas — TypeScript + Fastify + Clean Architecture",
   "main": "dist/server.js",
   "scripts": {
@@ -27,6 +27,8 @@
     "dotenv": "^17.4.2",
     "fastify": "^4.26.2",
     "jsonwebtoken": "^9.0.2",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0",
     "slugify": "^1.6.6",
     "uuid": "^9.0.0"
   },

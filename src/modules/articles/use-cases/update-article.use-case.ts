@@ -1,10 +1,10 @@
-// src/modules/articles/use-cases/update-article.use-case.ts
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../../shared/errors';
 import { ErrorCode } from '../../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../../shared/services/slugify';
-import { deleteImage } from '../../../shared/services/cloudinary';
+import { deleteImageSafe } from '../../../shared/services/cloudinary';   // ← safe variant
+import { logger as rootLogger, type Logger } from '../../../shared/logger';
 import {
   hasPermission,
   CAN_PUBLISH_ROLES,
@@ -33,7 +33,14 @@ const VALID_TYPES: ArticleType[] = ['NEWS', 'ANALYSIS', 'INTERVIEW', 'LIVE', 'GA
 const VALID_STATUSES: ArticleStatus[] = ['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED'];
 
 export class UpdateArticleUseCase {
-  constructor(private readonly repo: IArticleAdminRepository) { }
+  private readonly log: Logger;
+
+  constructor(
+    private readonly repo: IArticleAdminRepository,
+    log?: Logger,
+  ) {
+    this.log = log ?? rootLogger.child({ useCase: 'UpdateArticle' });
+  }
 
   async execute(
     id: string,
@@ -52,6 +59,10 @@ export class UpdateArticleUseCase {
     const canEditOwn = hasPermission(userRole, 'articles:edit_own') && isOwner;
 
     if (!canEditAny && !canEditOwn) {
+      this.log.warn(
+        { userId, userRole, articleId: id, ownerId: (existing as any).authorId },
+        'Tentativa de editar artigo sem permissão',
+      );
       throw new ForbiddenError(ErrorCode.ARTICLE_FORBIDDEN_EDIT, {
         articleId: id,
         ownerId: (existing as any).authorId,
@@ -59,11 +70,9 @@ export class UpdateArticleUseCase {
       });
     }
 
-    // ── Título: validações se fornecido ──
+    // ── Título ──
     if (input.title !== undefined) {
-      if (input.title.trim() === '') {
-        throw new ValidationError(ErrorCode.ARTICLE_TITLE_REQUIRED);
-      }
+      if (input.title.trim() === '') throw new ValidationError(ErrorCode.ARTICLE_TITLE_REQUIRED);
       if (input.title.trim().length > 255) {
         throw new ValidationError(ErrorCode.ARTICLE_TITLE_TOO_LONG, {
           max: 255,
@@ -72,7 +81,7 @@ export class UpdateArticleUseCase {
       }
     }
 
-    // ── Conteúdo: não pode ficar vazio se fornecido ──
+    // ── Conteúdo ──
     if (input.content !== undefined && input.content.trim() === '') {
       throw new ValidationError(ErrorCode.ARTICLE_CONTENT_REQUIRED);
     }
@@ -129,19 +138,16 @@ export class UpdateArticleUseCase {
     // ── SEO ──
     if (input.metaTitle && input.metaTitle.length > 60) {
       throw new ValidationError(ErrorCode.VALIDATION_STRING_TOO_LONG, {
-        field: 'metaTitle',
-        max: 60,
-        length: input.metaTitle.length,
+        field: 'metaTitle', max: 60, length: input.metaTitle.length,
       });
     }
     if (input.metaDescription && input.metaDescription.length > 160) {
       throw new ValidationError(ErrorCode.VALIDATION_STRING_TOO_LONG, {
-        field: 'metaDescription',
-        max: 160,
-        length: input.metaDescription.length,
+        field: 'metaDescription', max: 160, length: input.metaDescription.length,
       });
     }
 
+    // ── canPublish controla exclusivamente flags editoriais ──
     const canPublish = CAN_PUBLISH_ROLES.includes(userRole);
     const updateData: any = {};
 
@@ -168,6 +174,14 @@ export class UpdateArticleUseCase {
     if (input.status) {
       const finalStatus = this.resolveStatus(input.status, userRole);
       updateData.status = finalStatus;
+
+      if (finalStatus !== input.status) {
+        this.log.info(
+          { userId, userRole, articleId: id, requestedStatus: input.status, finalStatus },
+          'Status do artigo ajustado conforme permissão do cargo',
+        );
+      }
+
       if (finalStatus === 'PUBLISHED' && !(existing as any).publishedAt) {
         updateData.publishedAt = new Date();
       }
@@ -181,11 +195,12 @@ export class UpdateArticleUseCase {
     }
 
     if (coverImageUrl) {
-      if ((existing as any).coverImage) {
-        await deleteImage((existing as any).coverImage).catch(() => {
-          // não bloqueia a atualização se a deleção da imagem antiga falhar
-        });
-      }
+      // deleteImageSafe: o update não falha se a deleção da imagem antiga falhar,
+      // mas o erro é logado de forma estruturada para investigação.
+      await deleteImageSafe(
+        (existing as any).coverImage,
+        { articleId: id, userId, context: 'cover-image-swap' },
+      );
       updateData.coverImage = coverImageUrl;
     }
 
@@ -193,7 +208,14 @@ export class UpdateArticleUseCase {
       updateData.tagNames = input.tags.filter(t => t.trim() !== '');
     }
 
-    return this.repo.update(id, updateData);
+    const article = await this.repo.update(id, updateData);
+
+    this.log.info(
+      { articleId: id, userId, userRole, changedFields: Object.keys(updateData) },
+      'Artigo atualizado',
+    );
+
+    return article;
   }
 
   private resolveStatus(status: ArticleStatus, role: Role): ArticleStatus {

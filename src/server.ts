@@ -1,9 +1,8 @@
-// src/server.ts
 import 'dotenv/config';
 import { checkEnv } from './shared/env-check';
 import { buildApp } from './app';
+import { logger } from './shared/logger';
 import { startScheduler, stopScheduler } from './shared/workers/scheduler.worker';
-
 
 // Valida variáveis de ambiente antes de iniciar
 checkEnv();
@@ -15,11 +14,12 @@ async function main() {
 
   try {
     await app.listen({ port: PORT, host: '0.0.0.0' });
-    console.log(`\n🚀 Servidor rodando na porta ${PORT}`);
-    console.log(`📍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🏠 Health: http://localhost:${PORT}/api/health\n`);
+    logger.info(
+      { port: PORT, env: process.env.NODE_ENV ?? 'development', health: `http://localhost:${PORT}/api/health` },
+      'Servidor iniciado',
+    );
   } catch (err) {
-    app.log.error(err);
+    logger.error({ err }, 'Falha ao iniciar o servidor');
     process.exit(1);
   }
 
@@ -32,7 +32,7 @@ async function main() {
 
   // ─── Graceful shutdown ────────────────────────────────────────
   const shutdown = async (signal: string) => {
-    console.log(`\n⚠️  Recebido ${signal}. Encerrando servidor...`);
+    logger.info({ signal }, 'Sinal recebido — encerrando servidor');
     stopScheduler();
     await app.close();
     process.exit(0);

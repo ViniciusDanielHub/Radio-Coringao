@@ -1,9 +1,9 @@
-// src/modules/articles/use-cases/create-article.use-case.ts
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../../shared/errors';
 import { ErrorCode } from '../../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../../shared/services/slugify';
+import { logger as rootLogger, type Logger } from '../../../shared/logger';
 import {
   hasPermission,
   CAN_PUBLISH_ROLES,
@@ -32,7 +32,15 @@ const VALID_TYPES: ArticleType[] = ['NEWS', 'ANALYSIS', 'INTERVIEW', 'LIVE', 'GA
 const VALID_STATUSES: ArticleStatus[] = ['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED'];
 
 export class CreateArticleUseCase {
-  constructor(private readonly repo: IArticleAdminRepository) { }
+  private readonly log: Logger;
+
+  constructor(
+    private readonly repo: IArticleAdminRepository,
+    log?: Logger,
+  ) {
+    // Permite injetar um logger filho com requestId para correlação por requisição
+    this.log = log ?? rootLogger.child({ useCase: 'CreateArticle' });
+  }
 
   async execute(
     input: CreateArticleInput,
@@ -42,6 +50,7 @@ export class CreateArticleUseCase {
   ) {
     // ── Permissão ──
     if (!hasPermission(userRole, 'articles:create')) {
+      this.log.warn({ userId, userRole }, 'Tentativa de criar artigo sem permissão');
       throw new ForbiddenError('Seu cargo não permite criar artigos.');
     }
 
@@ -108,13 +117,12 @@ export class CreateArticleUseCase {
       }
     }
 
-    // ── Metadados SEO — comprimento máximo ──
+    // ── Metadados SEO ──
     if (input.metaTitle && input.metaTitle.length > 60) {
       throw new ValidationError(ErrorCode.VALIDATION_STRING_TOO_LONG, {
         field: 'metaTitle',
         max: 60,
         length: input.metaTitle.length,
-        hint: 'O meta title ideal tem no máximo 60 caracteres para SEO.',
       });
     }
     if (input.metaDescription && input.metaDescription.length > 160) {
@@ -122,10 +130,12 @@ export class CreateArticleUseCase {
         field: 'metaDescription',
         max: 160,
         length: input.metaDescription.length,
-        hint: 'A meta description ideal tem no máximo 160 caracteres para SEO.',
       });
     }
 
+    // ── resolveStatus() determina o status final com base no cargo.
+    //    canPublish é usado APENAS para as flags editoriais (isFeatured/isBreaking/isPinned)
+    //    abaixo — não para o status, que já está encapsulado em resolveStatus(). ──
     const canPublish = CAN_PUBLISH_ROLES.includes(userRole);
     const finalStatus = this.resolveStatus(input.status, userRole);
 
@@ -134,7 +144,15 @@ export class CreateArticleUseCase {
       (s, excl) => this.repo.slugExists(s, excl),
     );
 
-    return this.repo.create({
+    // Log quando o status pedido foi rebaixado (ex: JORNALISTA pediu PUBLISHED → REVIEW)
+    if (input.status && input.status !== finalStatus) {
+      this.log.info(
+        { userId, userRole, requestedStatus: input.status, finalStatus },
+        'Status do artigo ajustado conforme permissão do cargo',
+      );
+    }
+
+    const article = await this.repo.create({
       title: input.title.trim(),
       subtitle: input.subtitle?.trim() ?? undefined,
       slug,
@@ -142,6 +160,7 @@ export class CreateArticleUseCase {
       excerpt: input.excerpt?.trim() ?? undefined,
       type: input.type || 'NEWS',
       status: finalStatus,
+      // canPublish controla exclusivamente as flags editoriais visíveis no portal
       isFeatured: canPublish ? Boolean(input.isFeatured) : false,
       isBreaking: canPublish ? Boolean(input.isBreaking) : false,
       isPinned: canPublish ? Boolean(input.isPinned) : false,
@@ -156,6 +175,13 @@ export class CreateArticleUseCase {
       categoryId: input.categoryId,
       tagNames: input.tags?.filter(t => t.trim() !== ''),
     });
+
+    this.log.info(
+      { articleId: (article as any).id, slug, status: finalStatus, userId, userRole },
+      'Artigo criado',
+    );
+
+    return article;
   }
 
   private resolveStatus(requested: ArticleStatus | undefined, role: Role): ArticleStatus {

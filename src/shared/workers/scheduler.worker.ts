@@ -1,5 +1,7 @@
-// src/shared/workers/scheduler.worker.ts
 import { prisma } from '../database/prisma';
+import { logger } from '../logger';
+
+const log = logger.child({ worker: 'scheduler' });
 
 const DEFAULT_INTERVAL_MS = 60_000; // 1 minuto
 
@@ -9,7 +11,7 @@ let _consecutiveErrors = 0;
 const MAX_CONSECUTIVE_ERRORS = 5;
 
 async function publishScheduledArticles(): Promise<void> {
-  if (_running) return; // evita execuções sobrepostas
+  if (_running) return; 
   _running = true;
 
   try {
@@ -27,15 +29,15 @@ async function publishScheduledArticles(): Promise<void> {
       });
     } catch (dbErr: any) {
       _consecutiveErrors++;
-      console.error(
-        `[Scheduler] Erro ao consultar artigos agendados (tentativa ${_consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`,
-        dbErr?.message ?? dbErr,
+      log.error(
+        { err: dbErr, consecutiveErrors: _consecutiveErrors, maxConsecutiveErrors: MAX_CONSECUTIVE_ERRORS },
+        'Erro ao consultar artigos agendados',
       );
 
       if (_consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-        console.error(
-          `[Scheduler] ${MAX_CONSECUTIVE_ERRORS} erros consecutivos detectados. ` +
-          'Verifique a conexão com o banco de dados.',
+        log.error(
+          { consecutiveErrors: _consecutiveErrors },
+          'Limite de erros consecutivos atingido — verifique a conexão com o banco de dados',
         );
       }
       return;
@@ -43,8 +45,11 @@ async function publishScheduledArticles(): Promise<void> {
 
     if (articles.length === 0) {
       _consecutiveErrors = 0;
+      log.debug({ checkedAt: now.toISOString() }, 'Nenhum artigo agendado para publicar');
       return;
     }
+
+    log.info({ count: articles.length }, 'Artigos agendados encontrados para publicação');
 
     const results = await Promise.allSettled(
       articles.map((article) =>
@@ -59,59 +64,63 @@ async function publishScheduledArticles(): Promise<void> {
     );
 
     const succeeded: string[] = [];
-    const failed: string[] = [];
+    const failed: { id: string; title: string; error: string }[] = [];
 
     results.forEach((result, i) => {
       if (result.status === 'fulfilled') {
-        succeeded.push(articles[i].title);
+        succeeded.push(articles[i].id);
       } else {
-        failed.push(articles[i].title);
-        console.error(
-          `[Scheduler] Falha ao publicar "${articles[i].title}":`,
-          result.reason?.message ?? result.reason,
-        );
+        failed.push({
+          id: articles[i].id,
+          title: articles[i].title,
+          error: result.reason?.message ?? String(result.reason),
+        });
       }
     });
 
     if (succeeded.length > 0) {
-      console.log(`[Scheduler] ${succeeded.length} artigo(s) publicado(s):`, succeeded);
+      log.info({ articleIds: succeeded, count: succeeded.length }, 'Artigos publicados pelo scheduler');
     }
     if (failed.length > 0) {
-      console.warn(`[Scheduler] ${failed.length} artigo(s) falharam na publicação:`, failed);
+      log.warn({ failed, count: failed.length }, 'Falha ao publicar alguns artigos agendados');
     }
 
     _consecutiveErrors = 0;
   } catch (err: any) {
     _consecutiveErrors++;
-    console.error('[Scheduler] Erro inesperado:', err?.message ?? err);
+    log.error({ err, consecutiveErrors: _consecutiveErrors }, 'Erro inesperado no scheduler');
   } finally {
     _running = false;
   }
 }
 
 // ─── API pública ──────────────────────────────────────────────
+
 export function startScheduler(options?: { intervalMs?: number }): void {
   if (_timer) {
-    console.warn('[Scheduler] Já está rodando. Ignorando startScheduler().');
+    log.warn('Scheduler já está rodando — ignorando startScheduler()');
     return;
   }
 
   const interval = options?.intervalMs ?? DEFAULT_INTERVAL_MS;
 
   if (interval < 10_000) {
-    console.warn(`[Scheduler] Intervalo muito baixo (${interval}ms). Mínimo recomendado: 10.000ms.`);
+    log.warn(
+      { intervalMs: interval, recommendedMinMs: 10_000 },
+      'Intervalo do scheduler muito baixo',
+    );
   }
 
-  console.log(`[Scheduler] Iniciado. Verificando a cada ${interval / 1000}s.`);
+  log.info({ intervalMs: interval }, 'Scheduler iniciado');
 
-  // Executa imediatamente ao iniciar
+  // Executa imediatamente ao iniciar, sem aguardar o primeiro tick
   publishScheduledArticles();
 
   _timer = setInterval(() => {
     publishScheduledArticles();
   }, interval);
 
-  // Garante que o timer não bloqueia o processo
+  // Garante que o timer não bloqueia o processo ao encerrar
   if (_timer.unref) _timer.unref();
 }
 
@@ -121,7 +130,7 @@ export function stopScheduler(): void {
     _timer = null;
     _running = false;
     _consecutiveErrors = 0;
-    console.log('[Scheduler] Parado.');
+    log.info('Scheduler parado');
   }
 }
 

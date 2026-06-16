@@ -1,13 +1,20 @@
-// src/modules/categories/categories.service.ts
 import type { ICategoryRepository } from './categories.repository';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../shared/services/slugify';
+import { logger as rootLogger, type Logger } from '../../shared/logger';
 
 const HEX_COLOR_RE = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
 
 export class CategoryService {
-  constructor(private readonly repo: ICategoryRepository) { }
+  private readonly log: Logger;
+
+  constructor(
+    private readonly repo: ICategoryRepository,
+    log?: Logger,
+  ) {
+    this.log = log ?? rootLogger.child({ service: 'CategoryService' });
+  }
 
   async listPublic() { return this.repo.listPublic(); }
   async listAdmin() { return this.repo.listAdmin(); }
@@ -31,11 +38,11 @@ export class CategoryService {
       async (s) => !!(await this.repo.findBySlug(s)),
     );
 
-    // Checa nome duplicado
-    const nameTaken = await this.repo.findBySlug(slug);
-    // Se chegou aqui o slug já é único, mas checamos o name diretamente
+    // Nota: não há necessidade de checar slug/name antes do create —
+    // o índice UNIQUE do banco já garante isso e o erro P2002 é capturado abaixo.
+    // A variável `nameTaken` que existia antes era código morto (nunca lida).
     try {
-      return await this.repo.create({
+      const category = await this.repo.create({
         name: data.name.trim(),
         slug,
         description: data.description ?? null,
@@ -44,16 +51,14 @@ export class CategoryService {
         order: data.order ?? 0,
         isActive: true,
       });
+
+      this.log.info({ categoryId: (category as any).id, slug }, 'Categoria criada');
+      return category;
     } catch (err: any) {
-      // Captura violação unique do Prisma (P2002)
       if (err?.code === 'P2002') {
         const field = err?.meta?.target?.[0] ?? 'campo';
-        if (field.includes('name')) {
-          throw new ConflictError(ErrorCode.CATEGORY_NAME_TAKEN, { name: data.name });
-        }
-        if (field.includes('slug')) {
-          throw new ConflictError(ErrorCode.CATEGORY_SLUG_TAKEN, { slug });
-        }
+        if (field.includes('name')) throw new ConflictError(ErrorCode.CATEGORY_NAME_TAKEN, { name: data.name });
+        if (field.includes('slug')) throw new ConflictError(ErrorCode.CATEGORY_SLUG_TAKEN, { slug });
       }
       throw err;
     }
@@ -97,7 +102,9 @@ export class CategoryService {
     if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
     try {
-      return await this.repo.update(id, updateData);
+      const category = await this.repo.update(id, updateData);
+      this.log.info({ categoryId: id, changedFields: Object.keys(updateData) }, 'Categoria atualizada');
+      return category;
     } catch (err: any) {
       if (err?.code === 'P2002') {
         const field = err?.meta?.target?.[0] ?? '';
@@ -122,6 +129,7 @@ export class CategoryService {
     }
 
     await this.repo.delete(id);
+    this.log.info({ categoryId: id }, 'Categoria deletada');
     return { message: 'Categoria deletada.' };
   }
 }

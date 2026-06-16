@@ -1,14 +1,15 @@
-// src/shared/plugins/auth.plugin.ts
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { jwtService } from '../services/jwt';
+import { ERROR_MESSAGES } from '../errors';     
 import { ErrorCode } from '../errors/error-codes';
 import type { Role } from '../entities';
 
-// Corrigido: tipo sem | null — a função sempre retorna a instância
+// Lazy-load do repositório para evitar dependência circular no módulo raiz
 let _userRepo: { findById(id: string): Promise<any> } | undefined;
 
 function getUserRepo(): { findById(id: string): Promise<any> } {
   if (!_userRepo) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { UserRepository } = require('../../modules/users/users.repository');
     _userRepo = new UserRepository();
   }
@@ -72,10 +73,10 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
 
   let user: any;
   try {
-    // Corrigido: getUserRepo() agora sempre retorna a instância (nunca null)
     user = await getUserRepo().findById(decoded.id);
   } catch (dbErr: any) {
-    request.log?.error({ err: dbErr }, 'Erro ao buscar usuário no authenticate');
+    // request.log já carrega o requestId do Fastify — correlação automática
+    request.log.error({ err: dbErr, userId: decoded.id }, 'Erro ao buscar usuário no authenticate');
     return reply.code(503).send({
       code: ErrorCode.DB_CONNECTION_ERROR,
       error: ERROR_MESSAGES[ErrorCode.DB_CONNECTION_ERROR],
@@ -90,6 +91,8 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
 
   if (!user.isActive) {
+    // Log informacional: conta inativa tentando acessar — pode indicar abuso
+    request.log.warn({ userId: user.id, role: user.role }, 'Tentativa de acesso com conta inativa');
     return reply.code(401).send({
       code: ErrorCode.AUTH_USER_INACTIVE,
       error: ERROR_MESSAGES[ErrorCode.AUTH_USER_INACTIVE],
@@ -114,6 +117,10 @@ export function authorize(...roles: Role[]) {
       });
     }
     if (!roles.includes(request.user.role)) {
+      request.log.warn(
+        { userId: request.user.id, userRole: request.user.role, requiredRoles: roles },
+        'Acesso negado — cargo insuficiente',
+      );
       return reply.code(403).send({
         code: ErrorCode.PERMISSION_ROLE_INSUFFICIENT,
         error: `Acesso negado. Esta ação requer um dos cargos: ${roles.join(', ')}.`,
@@ -123,6 +130,3 @@ export function authorize(...roles: Role[]) {
     }
   };
 }
-
-// ─── Import tardio das mensagens (evita circular) ────────────
-import { ERROR_MESSAGES } from '../errors';
