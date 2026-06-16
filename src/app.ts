@@ -56,15 +56,6 @@ export async function buildApp() {
     errorResponseBuilder: () => ({ error: 'Muitas requisições, tente novamente em 15 minutos.' }),
   });
 
-  await app.register(async (instance: FastifyInstance) => {
-    await instance.register(rateLimit, {
-      max: 10,
-      timeWindow: '15 minutes',
-      errorResponseBuilder: () => ({ error: 'Muitas tentativas de login. Aguarde 15 minutos.' }),
-    });
-    instance.post('/api/auth/login', async () => ({}));
-  });
-
   // ─── Multipart (uploads) ──────────────────────────────────
   await app.register(multipart, {
     limits: { fileSize: 5 * 1024 * 1024 },
