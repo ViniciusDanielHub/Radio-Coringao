@@ -1,14 +1,14 @@
 // src/shared/plugins/auth.plugin.ts
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { jwtService } from '../services/jwt';
+import { UnauthorizedError, ForbiddenError } from '../errors';
+import { ErrorCode } from '../errors/error-codes';
 import type { Role } from '../entities';
 
-// Importação lazy para evitar dependência circular com o container
 let _userRepo: { findById(id: string): Promise<any> } | null = null;
 
 function getUserRepo() {
   if (!_userRepo) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { UserRepository } = require('../../modules/users/users.repository');
     _userRepo = new UserRepository();
   }
@@ -17,19 +17,37 @@ function getUserRepo() {
 
 export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const authHeader = request.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    reply.code(401).send({ error: 'Token de autenticação não fornecido.' });
-    return;
+
+  if (!authHeader) {
+    return reply.code(401).send({
+      code:  ErrorCode.AUTH_TOKEN_MISSING,
+      error: 'Token de autenticação não fornecido. Inclua o header: Authorization: Bearer <token>',
+    });
+  }
+
+  if (!authHeader.startsWith('Bearer ')) {
+    return reply.code(401).send({
+      code:  ErrorCode.AUTH_TOKEN_MALFORMED,
+      error: 'Formato de token inválido. Use: Authorization: Bearer <token>',
+    });
   }
 
   try {
-    const token = authHeader.split(' ')[1];
+    const token   = authHeader.split(' ')[1];
     const decoded = jwtService.verifyToken(token);
 
     const user = await getUserRepo().findById(decoded.id);
-    if (!user || !user.isActive) {
-      reply.code(401).send({ error: 'Usuário não encontrado ou desativado.' });
-      return;
+    if (!user) {
+      return reply.code(401).send({
+        code:  ErrorCode.AUTH_USER_NOT_FOUND,
+        error: 'Usuário associado ao token não encontrado. Faça login novamente.',
+      });
+    }
+    if (!user.isActive) {
+      return reply.code(401).send({
+        code:  ErrorCode.AUTH_USER_INACTIVE,
+        error: 'Esta conta foi desativada. Entre em contato com o administrador.',
+      });
     }
 
     request.user = {
@@ -41,17 +59,33 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     };
   } catch (err: any) {
     if (err.name === 'TokenExpiredError') {
-      reply.code(401).send({ error: 'Token expirado. Faça login novamente.' });
-    } else {
-      reply.code(401).send({ error: 'Token inválido.' });
+      return reply.code(401).send({
+        code:  ErrorCode.AUTH_TOKEN_EXPIRED,
+        error: 'Seu token expirou. Faça login novamente ou use o endpoint /api/auth/refresh.',
+      });
     }
+    return reply.code(401).send({
+      code:  ErrorCode.AUTH_TOKEN_INVALID,
+      error: 'Token de autenticação inválido ou corrompido.',
+    });
   }
 }
 
 export function authorize(...roles: Role[]) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!roles.includes(request.user?.role)) {
-      reply.code(403).send({ error: 'Acesso negado. Você não tem permissão para esta ação.' });
+    if (!request.user?.role) {
+      return reply.code(401).send({
+        code:  ErrorCode.AUTH_TOKEN_MISSING,
+        error: 'Autenticação necessária.',
+      });
+    }
+    if (!roles.includes(request.user.role)) {
+      return reply.code(403).send({
+        code:      ErrorCode.PERMISSION_ROLE_INSUFFICIENT,
+        error:     `Acesso negado. Esta ação requer um dos cargos: ${roles.join(', ')}.`,
+        yourRole:  request.user.role,
+        required:  roles,
+      });
     }
   };
 }

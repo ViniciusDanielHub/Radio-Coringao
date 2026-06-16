@@ -1,12 +1,10 @@
 // src/shared/plugins/permissions.plugin.ts
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { ErrorCode } from '../errors/error-codes';
 import type { Role } from '../entities';
 
 export type Permission =
-  // Usuários
   | 'users:manage'
-
-  // Artigos
   | 'articles:create'
   | 'articles:edit_own'
   | 'articles:edit_any'
@@ -14,25 +12,13 @@ export type Permission =
   | 'articles:publish'
   | 'articles:archive'
   | 'articles:delete'
-
-  // Categorias
   | 'categories:manage'
   | 'categories:delete'
-
-  // Tags
   | 'tags:delete'
-
-  // Banners
   | 'banners:manage'
-
-  // Menu
   | 'menu:manage'
   | 'menu:delete'
-
-  // Configurações
   | 'settings:manage'
-
-  // Dashboard
   | 'dashboard:view';
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
@@ -47,7 +33,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'settings:manage',
     'dashboard:view',
   ],
-
   EDITOR_CHEFE: [
     'articles:create', 'articles:edit_own', 'articles:edit_any',
     'articles:submit', 'articles:publish', 'articles:archive', 'articles:delete',
@@ -58,7 +43,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'settings:manage',
     'dashboard:view',
   ],
-
   EDITOR: [
     'articles:create', 'articles:edit_own', 'articles:edit_any',
     'articles:submit', 'articles:publish', 'articles:archive', 'articles:delete',
@@ -68,45 +52,17 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'menu:manage',
     'dashboard:view',
   ],
-
-  JORNALISTA: [
-    'articles:create',
-    'articles:edit_own',
-    'articles:submit',
-    'dashboard:view',
-  ],
-
-  COLUNISTA: [
-    'articles:create',
-    'articles:edit_own',
-    'articles:submit',
-    'dashboard:view',
-  ],
-
-  SOCIAL_MEDIA: [
-    'dashboard:view',
-    'articles:create',
-    'articles:edit_own',
-    'articles:submit',
-    'banners:manage',
-  ],
-
-  MODERADOR: [
-    'dashboard:view',
-    'articles:edit_any',
-    'articles:archive',
-    'tags:delete',
-  ],
-
-  SEO_MANAGER: [
-    'dashboard:view',
-    'articles:edit_any',
-    'categories:manage',
-    'tags:delete',
-  ],
+  JORNALISTA:   ['articles:create', 'articles:edit_own', 'articles:submit', 'dashboard:view'],
+  COLUNISTA:    ['articles:create', 'articles:edit_own', 'articles:submit', 'dashboard:view'],
+  SOCIAL_MEDIA: ['articles:create', 'articles:edit_own', 'articles:submit', 'banners:manage', 'dashboard:view'],
+  MODERADOR:    ['articles:edit_any', 'articles:archive', 'tags:delete', 'dashboard:view'],
+  SEO_MANAGER:  ['articles:edit_any', 'categories:manage', 'tags:delete', 'dashboard:view'],
 };
 
-// ─── Helpers ──────────────────────────────────────────────────
+export const CAN_PUBLISH_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR'];
+export const CAN_EDIT_ANY_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR', 'MODERADOR', 'SEO_MANAGER'];
+export const OWN_ARTICLES_ONLY_ROLES: Role[] = ['JORNALISTA', 'COLUNISTA', 'SOCIAL_MEDIA'];
+
 export function hasPermission(role: Role, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }
@@ -114,11 +70,21 @@ export function hasPermission(role: Role, permission: Permission): boolean {
 export function requirePermission(permission: Permission) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const role = request.user?.role;
-    if (!role || !hasPermission(role, permission)) {
-      reply.code(403).send({
-        error: 'Acesso negado. Você não tem permissão para esta ação.',
-        required: permission,
-        yourRole: role ?? 'unknown',
+
+    if (!role) {
+      return reply.code(401).send({
+        code:  ErrorCode.AUTH_TOKEN_MISSING,
+        error: 'Autenticação necessária para esta ação.',
+      });
+    }
+
+    if (!hasPermission(role, permission)) {
+      return reply.code(403).send({
+        code:       ErrorCode.PERMISSION_DENIED,
+        error:      `Seu cargo (${role}) não tem permissão para esta operação.`,
+        required:   permission,
+        yourRole:   role,
+        hint:       `Permissão necessária: "${permission}"`,
       });
     }
   };
@@ -126,12 +92,20 @@ export function requirePermission(permission: Permission) {
 
 export function authorize(...roles: Role[]) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    if (!roles.includes(request.user?.role)) {
-      reply.code(403).send({ error: 'Acesso negado. Você não tem permissão para esta ação.' });
+    const role = request.user?.role;
+    if (!role) {
+      return reply.code(401).send({
+        code:  ErrorCode.AUTH_TOKEN_MISSING,
+        error: 'Autenticação necessária.',
+      });
+    }
+    if (!roles.includes(role)) {
+      return reply.code(403).send({
+        code:     ErrorCode.PERMISSION_ROLE_INSUFFICIENT,
+        error:    `Acesso restrito. Cargos permitidos: ${roles.join(', ')}.`,
+        yourRole: role,
+        required: roles,
+      });
     }
   };
 }
-
-export const CAN_PUBLISH_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR'];
-export const CAN_EDIT_ANY_ROLES: Role[] = ['SUPER_ADMIN', 'EDITOR_CHEFE', 'EDITOR', 'MODERADOR', 'SEO_MANAGER'];
-export const OWN_ARTICLES_ONLY_ROLES: Role[] = ['JORNALISTA', 'COLUNISTA', 'SOCIAL_MEDIA'];

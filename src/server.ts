@@ -1,7 +1,12 @@
 // src/server.ts
 import 'dotenv/config';
+import { checkEnv } from './shared/env-check';
 import { buildApp } from './app';
 import { startScheduler, stopScheduler } from './shared/workers/scheduler.worker';
+
+
+// Valida variáveis de ambiente antes de iniciar
+checkEnv();
 
 const PORT = Number(process.env.PORT) || 3000;
 
