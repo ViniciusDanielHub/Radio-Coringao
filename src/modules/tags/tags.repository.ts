@@ -3,13 +3,19 @@ import { prisma } from '../../shared/database/prisma';
 import type { Tag } from '../../shared/entities';
 
 export interface ITagRepository {
+  findById(id: string): Promise<Tag | null>;
   findBySlug(slug: string): Promise<Tag | null>;
   list(search?: string): Promise<(Tag & { _count: { articles: number } })[]>;
   upsert(name: string, slug: string): Promise<Tag>;
+  countArticles(id: string): Promise<number>;
   delete(id: string): Promise<void>;
 }
 
 export class TagRepository implements ITagRepository {
+  async findById(id: string): Promise<Tag | null> {
+    return prisma.tag.findUnique({ where: { id } }) as Promise<Tag | null>;
+  }
+
   async findBySlug(slug: string): Promise<Tag | null> {
     return prisma.tag.findUnique({ where: { slug } }) as Promise<Tag | null>;
   }
@@ -30,6 +36,10 @@ export class TagRepository implements ITagRepository {
       update: {},
       create: { name: name.trim(), slug },
     }) as Promise<Tag>;
+  }
+
+  async countArticles(id: string): Promise<number> {
+    return prisma.articleTag.count({ where: { tagId: id } });
   }
 
   async delete(id: string): Promise<void> {

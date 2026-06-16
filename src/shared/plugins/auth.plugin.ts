@@ -4,14 +4,15 @@ import { jwtService } from '../services/jwt';
 import { ErrorCode } from '../errors/error-codes';
 import type { Role } from '../entities';
 
-let _userRepo: { findById(id: string): Promise<any> } | null = null;
+// Corrigido: tipo sem | null — a função sempre retorna a instância
+let _userRepo: { findById(id: string): Promise<any> } | undefined;
 
-function getUserRepo() {
+function getUserRepo(): { findById(id: string): Promise<any> } {
   if (!_userRepo) {
     const { UserRepository } = require('../../modules/users/users.repository');
     _userRepo = new UserRepository();
   }
-  return _userRepo;
+  return _userRepo!;
 }
 
 export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -71,6 +72,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
 
   let user: any;
   try {
+    // Corrigido: getUserRepo() agora sempre retorna a instância (nunca null)
     user = await getUserRepo().findById(decoded.id);
   } catch (dbErr: any) {
     request.log?.error({ err: dbErr }, 'Erro ao buscar usuário no authenticate');

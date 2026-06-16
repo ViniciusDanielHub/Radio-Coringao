@@ -166,12 +166,11 @@ export class UserService {
     if (!newPassword || newPassword.length < 6) {
       throw new ValidationError(ErrorCode.USER_WEAK_PASSWORD, { minLength: 6 });
     }
+    // Corrigido: usar ErrorCode.USER_SAME_PASSWORD com details em vez de 3 argumentos posicionais
     if (currentPassword === newPassword) {
-      throw new ValidationError(
-        'A nova senha não pode ser igual à senha atual.',
-        400,
-        'USER_SAME_PASSWORD',
-      );
+      throw new ValidationError(ErrorCode.USER_SAME_PASSWORD, {
+        hint: 'A nova senha não pode ser igual à senha atual.',
+      });
     }
 
     const user = await this.userRepo.findById(userId);
