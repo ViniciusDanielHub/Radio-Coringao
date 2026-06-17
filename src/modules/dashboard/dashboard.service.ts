@@ -14,17 +14,16 @@ export class DashboardService {
     const [stats, { topArticles, recentArticles }, topCategories, totalUsers] = await Promise.all([
       this.articleRepo.aggregateStats(),
       this.articleRepo.findForDashboard(),
-      this.categoryRepo.listAdmin(),
+      // Busca apenas as 5 top categorias diretamente no banco,
+      // sem trazer todas para fatiar em memória
+      this.categoryRepo.listTopByArticleCount(5),
       this.userRepo.count(),
     ]);
 
     return {
       stats: { ...stats, totalUsers },
       topArticles,
-      topCategories: topCategories.slice(0, 5).map((c: any) => ({
-        ...c,
-        articleCount: c._count?.articles || 0,
-      })),
+      topCategories,
       recentArticles,
     };
   }

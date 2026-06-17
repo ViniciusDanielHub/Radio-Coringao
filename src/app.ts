@@ -2,6 +2,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import compress from '@fastify/compress';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance } from 'fastify';
@@ -17,11 +18,8 @@ import { bannerPublicRoutes, bannerAdminRoutes } from './modules/banners/banners
 import { menuPublicRoutes, menuAdminRoutes } from './modules/menu/menu.routes';
 import { settingsPublicRoutes, settingsAdminRoutes } from './modules/settings/settings.routes';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes';
-
-// ─── Novos imports separados por public/admin ─────────────────
 import { articlePublicRoutes } from './modules/articles/public/articles-public.routes';
 import { articleAdminRoutes } from './modules/articles/admin/articles-admin.routes';
-
 import { liveScoresRoutes } from './modules/live-scores';
 
 export async function buildApp() {
@@ -32,20 +30,50 @@ export async function buildApp() {
   // ─── Security ─────────────────────────────────────────────
   await app.register(helmet, { global: true });
 
+  // ─── Compressão HTTP ──────────────────────────────────────
+  // Comprime respostas automaticamente quando o cliente suporta
+  // (Accept-Encoding: gzip, deflate, br).
+  // Reduz significativamente o tamanho de respostas JSON grandes
+  // (ex: listagens de artigos, standings do Brasileirão).
+  await app.register(compress, {
+    global: true,
+    // Comprime apenas respostas acima de 1KB para evitar overhead em respostas pequenas
+    threshold: 1024,
+    // Prefere brotli (melhor compressão) → gzip → deflate
+    encodings: ['br', 'gzip', 'deflate'],
+  });
+
   // ─── CORS ─────────────────────────────────────────────────
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3001')
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
-    .map((o) => o.trim());
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  const isDev = process.env.NODE_ENV === 'development';
 
   await app.register(cors, {
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        cb(null, true);
-      } else {
-        cb(new Error(`Origem não permitida pelo CORS: ${origin}`), false);
+      // Em desenvolvimento permite requisições sem origin (Postman, curl, etc.)
+      if (isDev && !origin) {
+        return cb(null, true);
       }
+
+      // Em produção, requisições sem origin (ex: curl direto) são bloqueadas
+      // a menos que ALLOWED_ORIGINS esteja vazio (configuração permissiva explícita)
+      if (!origin) {
+        if (allowedOrigins.length === 0) return cb(null, true);
+        return cb(new Error('Requisições sem origin não são permitidas em produção.'), false);
+      }
+
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+
+      cb(new Error(`Origem não permitida pelo CORS: ${origin}`), false);
     },
     credentials: true,
+    // Headers expostos para o cliente (ex: para paginação)
+    exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Total-Pages'],
   });
 
   // ─── Rate limiting ────────────────────────────────────────

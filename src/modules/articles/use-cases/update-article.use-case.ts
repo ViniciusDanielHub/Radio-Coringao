@@ -1,9 +1,11 @@
+// src/modules/articles/use-cases/update-article.use-case.ts
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../../shared/errors';
 import { ErrorCode } from '../../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../../shared/services/slugify';
-import { deleteImageSafe } from '../../../shared/services/cloudinary';   // ← safe variant
+import { deleteImageSafe } from '../../../shared/services/cloudinary';
+import { sanitizeArticleContent, sanitizePlainText } from '../../../shared/services/sanitize';
 import { logger as rootLogger, type Logger } from '../../../shared/logger';
 import {
   hasPermission,
@@ -147,7 +149,6 @@ export class UpdateArticleUseCase {
       });
     }
 
-    // ── canPublish controla exclusivamente flags editoriais ──
     const canPublish = CAN_PUBLISH_ROLES.includes(userRole);
     const updateData: any = {};
 
@@ -160,9 +161,19 @@ export class UpdateArticleUseCase {
       );
     }
 
-    if (input.subtitle !== undefined) updateData.subtitle = input.subtitle?.trim() ?? null;
-    if (input.content) updateData.content = input.content;
-    if (input.excerpt !== undefined) updateData.excerpt = input.excerpt?.trim() ?? null;
+    if (input.subtitle !== undefined) {
+      updateData.subtitle = input.subtitle ? sanitizePlainText(input.subtitle) : null;
+    }
+
+    // ── Sanitização XSS ──────────────────────────────────────
+    if (input.content) {
+      updateData.content = sanitizeArticleContent(input.content);
+    }
+
+    if (input.excerpt !== undefined) {
+      updateData.excerpt = input.excerpt ? sanitizePlainText(input.excerpt) : null;
+    }
+
     if (input.categoryId) updateData.categoryId = input.categoryId;
     if (input.type) updateData.type = input.type;
     if (input.metaTitle !== undefined) updateData.metaTitle = input.metaTitle?.trim() ?? null;
@@ -187,7 +198,6 @@ export class UpdateArticleUseCase {
       }
     }
 
-    // Apenas cargos que podem publicar alteram flags editoriais
     if (canPublish) {
       if (input.isFeatured !== undefined) updateData.isFeatured = Boolean(input.isFeatured);
       if (input.isBreaking !== undefined) updateData.isBreaking = Boolean(input.isBreaking);
@@ -195,8 +205,6 @@ export class UpdateArticleUseCase {
     }
 
     if (coverImageUrl) {
-      // deleteImageSafe: o update não falha se a deleção da imagem antiga falhar,
-      // mas o erro é logado de forma estruturada para investigação.
       await deleteImageSafe(
         (existing as any).coverImage,
         { articleId: id, userId, context: 'cover-image-swap' },

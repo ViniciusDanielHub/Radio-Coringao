@@ -3,7 +3,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { AuthService } from './auth.service';
 
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   login = async (request: FastifyRequest, reply: FastifyReply) => {
     const { email, password } = request.body as { email: string; password: string };
@@ -19,7 +19,12 @@ export class AuthController {
 
   logout = async (request: FastifyRequest, reply: FastifyReply) => {
     const { refreshToken } = request.body as { refreshToken?: string };
-    const result = await this.authService.logout(refreshToken);
+
+    // Recupera jti e exp do access token armazenados pelo middleware authenticate
+    const jti = (request as any).tokenJti as string | undefined;
+    const exp = (request as any).tokenExp as number | undefined;
+
+    const result = await this.authService.logout(refreshToken, jti, exp);
     return reply.send(result);
   };
 

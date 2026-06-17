@@ -1,10 +1,10 @@
+// src/server.ts
 import 'dotenv/config';
 import { checkEnv } from './shared/env-check';
 import { buildApp } from './app';
 import { logger } from './shared/logger';
 import { startScheduler, stopScheduler } from './shared/workers/scheduler.worker';
 
-// Valida variáveis de ambiente antes de iniciar
 checkEnv();
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -23,14 +23,12 @@ async function main() {
     process.exit(1);
   }
 
-  // ─── Scheduler ────────────────────────────────────────────────
   if (process.env.NODE_ENV !== 'test') {
     startScheduler({
       intervalMs: Number(process.env.SCHEDULER_INTERVAL_MS) || 60_000,
     });
   }
 
-  // ─── Graceful shutdown ────────────────────────────────────────
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Sinal recebido — encerrando servidor');
     stopScheduler();

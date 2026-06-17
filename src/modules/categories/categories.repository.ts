@@ -1,5 +1,6 @@
 // src/modules/categories/categories.repository.ts
 import { prisma } from '../../shared/database/prisma';
+import { Prisma } from '@prisma/client';
 import type { Category } from '../../shared/entities';
 
 export interface ICategoryRepository {
@@ -12,6 +13,7 @@ export interface ICategoryRepository {
   delete(id: string): Promise<void>;
   countArticles(categoryId: string): Promise<number>;
   slugExists(slug: string, excludeId?: string): Promise<boolean>;
+  listTopByArticleCount(limit: number): Promise<(Category & { articleCount: number })[]>;
 }
 
 export class CategoryRepository implements ICategoryRepository {
@@ -21,6 +23,32 @@ export class CategoryRepository implements ICategoryRepository {
 
   async findBySlug(slug: string): Promise<Category | null> {
     return prisma.category.findUnique({ where: { slug } }) as Promise<Category | null>;
+  }
+
+  async listTopByArticleCount(limit: number): Promise<(Category & { articleCount: number })[]> {
+    type CategoryWithCount = Prisma.CategoryGetPayload<{
+      include: { _count: { select: { articles: true } } };
+    }>;
+
+    const results: CategoryWithCount[] = await prisma.category.findMany({
+      take: limit,
+      orderBy: { articles: { _count: 'desc' } },
+      include: { _count: { select: { articles: { where: { status: 'PUBLISHED' } } } } },
+    });
+
+    return results.map((c) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      description: c.description,
+      color: c.color,
+      icon: c.icon,
+      isActive: c.isActive,
+      order: c.order,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+      articleCount: c._count.articles,
+    }));
   }
 
   async listPublic(): Promise<(Category & { _count: { articles: number } })[]> {

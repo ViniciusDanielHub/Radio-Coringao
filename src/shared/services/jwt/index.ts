@@ -1,6 +1,15 @@
 // src/shared/services/jwt/index.ts
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
 import type { JwtPayload } from '../../types';
+
+// Extende o payload para incluir jti (JWT ID) e exp (expiry)
+// usados pela blacklist de tokens
+export interface FullJwtPayload extends JwtPayload {
+  jti: string;
+  iat: number;
+  exp: number;
+}
 
 export class JwtService {
   private readonly secret: string;
@@ -14,15 +23,23 @@ export class JwtService {
   }
 
   generateAccessToken(payload: JwtPayload): string {
-    return jwt.sign(payload, this.secret, { expiresIn: this.accessExpiresIn } as jwt.SignOptions);
+    return jwt.sign(
+      { ...payload, jti: uuidv4() },  // ← jti único por token
+      this.secret,
+      { expiresIn: this.accessExpiresIn } as jwt.SignOptions,
+    );
   }
 
   generateRefreshToken(payload: JwtPayload): string {
-    return jwt.sign(payload, this.secret, { expiresIn: this.refreshExpiresIn } as jwt.SignOptions);
+    return jwt.sign(
+      { ...payload, jti: uuidv4() },
+      this.secret,
+      { expiresIn: this.refreshExpiresIn } as jwt.SignOptions,
+    );
   }
 
-  verifyToken(token: string): JwtPayload {
-    return jwt.verify(token, this.secret) as JwtPayload;
+  verifyToken(token: string): FullJwtPayload {
+    return jwt.verify(token, this.secret) as FullJwtPayload;
   }
 
   getRefreshExpiryDate(): Date {

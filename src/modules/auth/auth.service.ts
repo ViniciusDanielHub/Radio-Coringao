@@ -1,9 +1,11 @@
+// src/modules/auth/auth.service.ts
 import bcrypt from 'bcryptjs';
 import type { IUserRepository } from '../users/users.repository';
 import type { IRefreshTokenRepository } from './auth.repository';
 import type { JwtService } from '../../shared/services/jwt';
 import { UnauthorizedError, ValidationError } from '../../shared/errors';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { blacklistToken } from '../../shared/services/token-blacklist';
 
 export class AuthService {
   constructor(
@@ -22,7 +24,6 @@ export class AuthService {
 
     const user = await this.userRepo.findByEmail(email.trim().toLowerCase());
 
-    // Mesmo erro para e-mail não encontrado e senha errada (evita enumeração)
     if (!user) {
       throw new UnauthorizedError(ErrorCode.AUTH_CREDENTIALS_INVALID);
     }
@@ -77,9 +78,6 @@ export class AuthService {
       throw new UnauthorizedError(ErrorCode.AUTH_USER_INACTIVE);
     }
 
-    // ── ROTAÇÃO: invalida o token antigo antes de emitir o novo ──
-    // Se deleteByToken falhar (ex: race condition), lançamos 401 para
-    // forçar novo login — preferível a emitir um token duplicado.
     await this.tokenRepo.deleteByToken(refreshToken);
 
     const newPayload = { id: stored.user.id, role: stored.user.role };
@@ -92,16 +90,22 @@ export class AuthService {
       expiresAt: this.jwtService.getRefreshExpiryDate(),
     });
 
-    // Retorna o novo par. O cliente DEVE substituir o refresh token armazenado.
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
-  async logout(refreshToken?: string) {
+  async logout(refreshToken?: string, accessTokenJti?: string, accessTokenExp?: number) {
+    // ── Revoga o refresh token ──
     if (refreshToken && refreshToken.trim() !== '') {
-      await this.tokenRepo.deleteByToken(refreshToken).catch(() => {
-        // Ignora erro ao deletar token — logout deve sempre suceder
-      });
+      await this.tokenRepo.deleteByToken(refreshToken).catch(() => { });
     }
+
+    // ── Blacklista o access token para invalidação imediata ──
+    // Mesmo que o access token ainda não tenha expirado, ele será rejeitado
+    // em qualquer requisição subsequente.
+    if (accessTokenJti && accessTokenExp) {
+      await blacklistToken(accessTokenJti, accessTokenExp * 1000).catch(() => { });
+    }
+
     return { message: 'Logout realizado com sucesso.' };
   }
 

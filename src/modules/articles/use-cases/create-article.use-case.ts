@@ -1,8 +1,10 @@
+// src/modules/articles/use-cases/create-article.use-case.ts
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../../shared/errors';
 import { ErrorCode } from '../../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../../shared/services/slugify';
+import { sanitizeArticleContent, sanitizePlainText } from '../../../shared/services/sanitize';
 import { logger as rootLogger, type Logger } from '../../../shared/logger';
 import {
   hasPermission,
@@ -38,7 +40,6 @@ export class CreateArticleUseCase {
     private readonly repo: IArticleAdminRepository,
     log?: Logger,
   ) {
-    // Permite injetar um logger filho com requestId para correlação por requisição
     this.log = log ?? rootLogger.child({ useCase: 'CreateArticle' });
   }
 
@@ -133,9 +134,6 @@ export class CreateArticleUseCase {
       });
     }
 
-    // ── resolveStatus() determina o status final com base no cargo.
-    //    canPublish é usado APENAS para as flags editoriais (isFeatured/isBreaking/isPinned)
-    //    abaixo — não para o status, que já está encapsulado em resolveStatus(). ──
     const canPublish = CAN_PUBLISH_ROLES.includes(userRole);
     const finalStatus = this.resolveStatus(input.status, userRole);
 
@@ -144,7 +142,6 @@ export class CreateArticleUseCase {
       (s, excl) => this.repo.slugExists(s, excl),
     );
 
-    // Log quando o status pedido foi rebaixado (ex: JORNALISTA pediu PUBLISHED → REVIEW)
     if (input.status && input.status !== finalStatus) {
       this.log.info(
         { userId, userRole, requestedStatus: input.status, finalStatus },
@@ -152,15 +149,21 @@ export class CreateArticleUseCase {
       );
     }
 
+    // ── Sanitização XSS ──────────────────────────────────────
+    // Sanitiza o conteúdo HTML para remover tags e atributos perigosos.
+    // Feito APÓS todas as validações e ANTES de persistir no banco.
+    const sanitizedContent = sanitizeArticleContent(input.content);
+    const sanitizedExcerpt = input.excerpt ? sanitizePlainText(input.excerpt) : undefined;
+    const sanitizedSubtitle = input.subtitle ? sanitizePlainText(input.subtitle) : undefined;
+
     const article = await this.repo.create({
       title: input.title.trim(),
-      subtitle: input.subtitle?.trim() ?? undefined,
+      subtitle: sanitizedSubtitle ?? undefined,
       slug,
-      content: input.content,
-      excerpt: input.excerpt?.trim() ?? undefined,
+      content: sanitizedContent,
+      excerpt: sanitizedExcerpt ?? undefined,
       type: input.type || 'NEWS',
       status: finalStatus,
-      // canPublish controla exclusivamente as flags editoriais visíveis no portal
       isFeatured: canPublish ? Boolean(input.isFeatured) : false,
       isBreaking: canPublish ? Boolean(input.isBreaking) : false,
       isPinned: canPublish ? Boolean(input.isPinned) : false,
