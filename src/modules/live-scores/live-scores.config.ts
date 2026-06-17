@@ -4,7 +4,7 @@ export const LIVE_SCORES_CONFIG = {
   competition: 'BSA', // Brasileirão Série A
 
   teams: {
-    corinthians: 1782,
+    corinthians: 1779,
     palmeiras: 1783,
     saoPaulo: 1784,
     santos: 1785,

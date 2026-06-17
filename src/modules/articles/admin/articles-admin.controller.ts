@@ -9,6 +9,7 @@ import type { UpdateArticleStatusUseCase }  from '../use-cases/update-article-st
 import type { DeleteArticleUseCase }        from '../use-cases/delete-article.use-case';
 import type { AddArticleImageUseCase }      from '../use-cases/add-article-image.use-case';
 import type { DeleteArticleImageUseCase }   from '../use-cases/delete-article-image.use-case';
+import type { CreateArticleInput } from '../use-cases/create-article.use-case';
 
 export class ArticleAdminController {
   constructor(
@@ -43,9 +44,28 @@ export class ArticleAdminController {
   };
 
   create = async (request: FastifyRequest, reply: FastifyReply) => {
+    console.log('BODY:', JSON.stringify(request.body));
+    console.log('UPLOADED FILE:', request.uploadedFile);
+
+    const rawBody = request.body as Record<string, any> ?? {};
+
+    const fields: Record<string, any> = {};
+    for (const [key, val] of Object.entries(rawBody)) {
+      if (Array.isArray(val)) {
+        fields[key] = val.map((v: any) => v?.value ?? v);
+      } else {
+        fields[key] = (val as any)?.value ?? val;
+      }
+    }
+
+    // Converte tags de string para array se necessário
+    if (fields.tags && typeof fields.tags === 'string') {
+      fields.tags = fields.tags.split(',').map((t: string) => t.trim());
+    }
+
     return reply.code(201).send(
       await this.createUseCase.execute(
-        request.body as any,
+        fields as CreateArticleInput,
         request.user.id,
         request.user.role,
         request.uploadedFile?.path,

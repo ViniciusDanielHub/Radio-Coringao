@@ -19,7 +19,7 @@ import { uploadImage, type UploadFolder } from '../services/cloudinary';
 import { UploadError } from '../errors';
 import { ErrorCode } from '../errors/error-codes';
 
-const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
@@ -142,35 +142,51 @@ function parseWebpDimensions(buf: Buffer): ImageDimensions | null {
 
 export function createUploadHandler(folder: UploadFolder) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-    let data: Awaited<ReturnType<typeof request.file>>;
+    const fields: Record<string, any> = {};
+    let fileBuffer: Buffer | null = null;
+    let fileMimetype = '';
+    let fileFieldname = '';
 
     try {
-      data = await request.file({ limits: { fileSize: MAX_SIZE_BYTES } });
-    } catch (err: any) {
-      if (
-        err.message === 'File size limit reached' ||
-        (err as any).code === 'FST_FILES_LIMIT' ||
-        err.statusCode === 413
-      ) {
-        return reply.code(413).send({
-          code: ErrorCode.UPLOAD_TOO_LARGE,
-          error: `O arquivo excede o limite de ${MAX_SIZE_BYTES / 1024 / 1024}MB.`,
-          maxMb: 5,
-        });
+      const parts = request.parts({ limits: { fileSize: MAX_SIZE_BYTES } });
+
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          try {
+            fileBuffer = await part.toBuffer();
+            fileMimetype = part.mimetype;
+            fileFieldname = part.fieldname;
+          } catch (err: any) {
+            if (err.message === 'File size limit reached') {
+              return reply.code(413).send({
+                code: ErrorCode.UPLOAD_TOO_LARGE,
+                error: `O arquivo excede o limite de ${MAX_SIZE_BYTES / 1024 / 1024}MB.`,
+                maxMb: 5,
+              });
+            }
+            throw err;
+          }
+        } else {
+          fields[part.fieldname] = part.value;
+        }
       }
+    } catch (err: any) {
       return reply.code(400).send({
         code: ErrorCode.UPLOAD_NO_FILE,
-        error: 'Erro ao processar o arquivo enviado.',
+        error: 'Erro ao processar o envio.',
         details: process.env.NODE_ENV !== 'production' ? err.message : undefined,
       });
     }
 
-    if (!data) return;
+    // Popula o body com os campos de texto
+    request.body = fields;
+
+    // Se não veio arquivo, encerra aqui
+    if (!fileBuffer || fileBuffer.length === 0) return;
 
     // ── Valida tipo MIME declarado ──
-    const declaredMime = data.mimetype?.toLowerCase() ?? '';
+    const declaredMime = fileMimetype?.toLowerCase() ?? '';
     if (!ACCEPTED_TYPES.includes(declaredMime)) {
-      data.file.resume();
       return reply.code(415).send({
         code: ErrorCode.UPLOAD_INVALID_TYPE,
         error: 'Tipo de arquivo não suportado. Envie apenas imagens JPEG, PNG ou WebP.',
@@ -179,40 +195,24 @@ export function createUploadHandler(folder: UploadFolder) {
       });
     }
 
-    let buffer: Buffer;
-    try {
-      buffer = await data.toBuffer();
-    } catch {
-      return reply.code(400).send({
-        code: ErrorCode.UPLOAD_CORRUPTED_FILE,
-        error: 'Não foi possível ler o arquivo enviado. Tente novamente.',
-      });
-    }
-
-    if (!buffer || buffer.length === 0) {
-      return reply.code(400).send({
-        code: ErrorCode.UPLOAD_EMPTY_FILE,
-        error: 'O arquivo enviado está vazio.',
-      });
-    }
-
-    if (buffer.length > MAX_SIZE_BYTES) {
+    if (fileBuffer.length > MAX_SIZE_BYTES) {
       return reply.code(413).send({
         code: ErrorCode.UPLOAD_TOO_LARGE,
-        error: `O arquivo tem ${(buffer.length / 1024 / 1024).toFixed(2)}MB. Máximo permitido: 5MB.`,
+        error: `O arquivo tem ${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB. Máximo permitido: 5MB.`,
         maxMb: 5,
-        sizeMb: +(buffer.length / 1024 / 1024).toFixed(2),
+        sizeMb: +(fileBuffer.length / 1024 / 1024).toFixed(2),
       });
     }
 
     // ── Valida magic bytes ──
-    const realMime = detectMimeFromBuffer(buffer);
+    const realMime = detectMimeFromBuffer(fileBuffer);
     if (!realMime) {
       return reply.code(415).send({
         code: ErrorCode.UPLOAD_CORRUPTED_FILE,
         error: 'O arquivo enviado não é uma imagem válida (verificação de conteúdo falhou).',
       });
     }
+
     const normalizedDeclared = declaredMime === 'image/jpg' ? 'image/jpeg' : declaredMime;
     if (realMime !== normalizedDeclared) {
       return reply.code(415).send({
@@ -223,8 +223,8 @@ export function createUploadHandler(folder: UploadFolder) {
       });
     }
 
-    // ── Valida dimensões ──────────────────────────────────────
-    const dims = parseDimensions(buffer, realMime);
+    // ── Valida dimensões ──
+    const dims = parseDimensions(fileBuffer, realMime);
     if (dims) {
       const limits = DIMENSION_LIMITS[folder];
 
@@ -246,16 +246,14 @@ export function createUploadHandler(folder: UploadFolder) {
         });
       }
     }
-    // Se parseDimensions retornar null (formato inesperado), o upload prossegue —
-    // o Cloudinary fará sua própria validação e rejeitará arquivos inválidos.
 
     // ── Faz o upload ──
     try {
-      const url = await uploadImage(buffer, folder, data.mimetype);
+      const url = await uploadImage(fileBuffer, folder, fileMimetype);
       request.uploadedFile = {
         path: url,
-        mimetype: data.mimetype,
-        fieldname: data.fieldname,
+        mimetype: fileMimetype,
+        fieldname: fileFieldname,
       };
     } catch (err: any) {
       throw new UploadError(ErrorCode.UPLOAD_CLOUDINARY_FAILED, {
