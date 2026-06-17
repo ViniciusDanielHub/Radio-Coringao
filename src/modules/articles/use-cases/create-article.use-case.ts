@@ -1,7 +1,7 @@
 // src/modules/articles/use-cases/create-article.use-case.ts
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
-import { ForbiddenError, NotFoundError, ValidationError } from '../../../shared/errors';
+import { ForbiddenError, NotFoundError, ValidationError, ConflictError } from '../../../shared/errors';
 import { ErrorCode } from '../../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../../shared/services/slugify';
 import { sanitizeArticleContent, sanitizePlainText } from '../../../shared/services/sanitize';
@@ -150,37 +150,45 @@ export class CreateArticleUseCase {
     }
 
     // ── Sanitização XSS ──────────────────────────────────────
-    // Sanitiza o conteúdo HTML para remover tags e atributos perigosos.
-    // Feito APÓS todas as validações e ANTES de persistir no banco.
     const sanitizedContent = sanitizeArticleContent(input.content);
     const sanitizedExcerpt = input.excerpt ? sanitizePlainText(input.excerpt) : undefined;
     const sanitizedSubtitle = input.subtitle ? sanitizePlainText(input.subtitle) : undefined;
 
-    const article = await this.repo.create({
-      title: input.title.trim(),
-      subtitle: sanitizedSubtitle ?? undefined,
-      slug,
-      content: sanitizedContent,
-      excerpt: sanitizedExcerpt ?? undefined,
-      type: input.type || 'NEWS',
-      status: finalStatus,
-      isFeatured: canPublish ? Boolean(input.isFeatured) : false,
-      isBreaking: canPublish ? Boolean(input.isBreaking) : false,
-      isPinned: canPublish ? Boolean(input.isPinned) : false,
-      coverImage: coverImageUrl || null,
-      coverImageAlt: input.coverImageAlt?.trim() ?? undefined,
-      coverImageCredit: input.coverImageCredit?.trim() ?? undefined,
-      metaTitle: input.metaTitle?.trim() ?? undefined,
-      metaDescription: input.metaDescription?.trim() ?? undefined,
-      publishedAt: finalStatus === 'PUBLISHED' ? new Date() : null,
-      scheduledAt,
-      authorId: userId,
-      categoryId: input.categoryId,
-      tagNames: input.tags?.filter(t => t.trim() !== ''),
-    });
+    let article: any;
+    try {
+      article = await this.repo.create({
+        title: input.title.trim(),
+        subtitle: sanitizedSubtitle ?? undefined,
+        slug,
+        content: sanitizedContent,
+        excerpt: sanitizedExcerpt ?? undefined,
+        type: input.type || 'NEWS',
+        status: finalStatus,
+        isFeatured: canPublish ? Boolean(input.isFeatured) : false,
+        isBreaking: canPublish ? Boolean(input.isBreaking) : false,
+        isPinned: canPublish ? Boolean(input.isPinned) : false,
+        coverImage: coverImageUrl || null,
+        coverImageAlt: input.coverImageAlt?.trim() ?? undefined,
+        coverImageCredit: input.coverImageCredit?.trim() ?? undefined,
+        metaTitle: input.metaTitle?.trim() ?? undefined,
+        metaDescription: input.metaDescription?.trim() ?? undefined,
+        publishedAt: finalStatus === 'PUBLISHED' ? new Date() : null,
+        scheduledAt,
+        authorId: userId,
+        categoryId: input.categoryId,
+        tagNames: input.tags?.filter(t => t.trim() !== ''),
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictError(ErrorCode.ARTICLE_SLUG_TAKEN, {
+          hint: 'Já existe um artigo com este slug. Tente um título diferente.',
+        });
+      }
+      throw err;
+    }
 
     this.log.info(
-      { articleId: (article as any).id, slug, status: finalStatus, userId, userRole },
+      { articleId: article.id, slug, status: finalStatus, userId, userRole },
       'Artigo criado',
     );
 

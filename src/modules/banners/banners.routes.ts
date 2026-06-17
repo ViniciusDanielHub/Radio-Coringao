@@ -1,7 +1,5 @@
-// src/modules/banners/banners.routes.ts
 import type { FastifyInstance } from 'fastify';
 import { bannerController } from '../../shared/container';
-import { createBannerSchema, updateBannerSchema } from './banners.schema';
 import { requirePermission } from '../../shared/plugins/permissions.plugin';
 import { createUploadHandler } from '../../shared/plugins/upload.plugin';
 
@@ -16,13 +14,13 @@ export async function bannerAdminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     '/banners',
-    { preHandler: [requirePermission('banners:manage'), uploadBanner], schema: createBannerSchema },
+    { preHandler: [requirePermission('banners:manage'), uploadBanner] },
     bannerController.create,
   );
 
   app.patch(
     '/banners/:id',
-    { preHandler: [requirePermission('banners:manage'), uploadBanner], schema: updateBannerSchema },
+    { preHandler: [requirePermission('banners:manage'), uploadBanner] },
     bannerController.update,
   );
 

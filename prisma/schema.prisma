@@ -192,11 +192,12 @@ model MenuItem {
   order     Int        @default(0)
   parentId  String?
   isActive  Boolean    @default(true)
-  createdAt DateTime   @default(now())
+  createdAt DateTime   @default(now())  // ← adicione essa linha
 
   parent    MenuItem?  @relation("MenuHierarchy", fields: [parentId], references: [id])
   children  MenuItem[] @relation("MenuHierarchy")
 
+  @@unique([label, parentId])
   @@map("menu_items")
 }
 

@@ -116,7 +116,7 @@ export class BannerService {
     const updateData: any = {};
     if (data.title !== undefined) updateData.title = data.title.trim();
     if (data.linkUrl !== undefined) updateData.linkUrl = data.linkUrl ?? null;
-    if (data.isActive !== undefined) updateData.isActive = data.isActive;
+    if (data.isActive !== undefined) updateData.isActive = String(data.isActive) === 'true';
     if (data.order !== undefined) updateData.order = Number(data.order);
     if (startsAt !== undefined) updateData.startsAt = startsAt;
     if (endsAt !== undefined) updateData.endsAt = endsAt;

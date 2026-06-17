@@ -1,7 +1,7 @@
 // src/modules/articles/use-cases/update-article.use-case.ts
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { ArticleStatus, ArticleType, Role } from '../../../shared/entities';
-import { NotFoundError, ForbiddenError, ValidationError } from '../../../shared/errors';
+import { NotFoundError, ForbiddenError, ValidationError, ConflictError } from '../../../shared/errors';
 import { ErrorCode } from '../../../shared/errors/error-codes';
 import { createUniqueSlug } from '../../../shared/services/slugify';
 import { deleteImageSafe } from '../../../shared/services/cloudinary';
@@ -165,7 +165,6 @@ export class UpdateArticleUseCase {
       updateData.subtitle = input.subtitle ? sanitizePlainText(input.subtitle) : null;
     }
 
-    // ── Sanitização XSS ──────────────────────────────────────
     if (input.content) {
       updateData.content = sanitizeArticleContent(input.content);
     }
@@ -216,7 +215,17 @@ export class UpdateArticleUseCase {
       updateData.tagNames = input.tags.filter(t => t.trim() !== '');
     }
 
-    const article = await this.repo.update(id, updateData);
+    let article: any;
+    try {
+      article = await this.repo.update(id, updateData);
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictError(ErrorCode.ARTICLE_SLUG_TAKEN, {
+          hint: 'Já existe um artigo com este slug. Tente um título diferente.',
+        });
+      }
+      throw err;
+    }
 
     this.log.info(
       { articleId: id, userId, userRole, changedFields: Object.keys(updateData) },

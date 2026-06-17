@@ -23,7 +23,7 @@ export const CORINTHIANS_CONFIG = {
 
   // ─── IDs do Corinthians em cada API ──────────────────────
   ids: {
-    footballData: 1782,        // football-data.org
+    footballData: 1779,        // football-data.org
     apiFootball: 131,          // api-football / RapidAPI
     sofascore: 1963,           // sofascore (referência)
     flashscore: 'corinthians', // flashscore (referência)

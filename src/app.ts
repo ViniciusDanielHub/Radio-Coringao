@@ -21,6 +21,7 @@ import { dashboardRoutes } from './modules/dashboard/dashboard.routes';
 import { articlePublicRoutes } from './modules/articles/public/articles-public.routes';
 import { articleAdminRoutes } from './modules/articles/admin/articles-admin.routes';
 import { liveScoresRoutes } from './modules/live-scores';
+import { corinthiansRoutes } from './modules/corinthians';
 
 export async function buildApp() {
   const app = Fastify({
@@ -31,15 +32,9 @@ export async function buildApp() {
   await app.register(helmet, { global: true });
 
   // ─── Compressão HTTP ──────────────────────────────────────
-  // Comprime respostas automaticamente quando o cliente suporta
-  // (Accept-Encoding: gzip, deflate, br).
-  // Reduz significativamente o tamanho de respostas JSON grandes
-  // (ex: listagens de artigos, standings do Brasileirão).
   await app.register(compress, {
     global: true,
-    // Comprime apenas respostas acima de 1KB para evitar overhead em respostas pequenas
     threshold: 1024,
-    // Prefere brotli (melhor compressão) → gzip → deflate
     encodings: ['br', 'gzip', 'deflate'],
   });
 
@@ -53,13 +48,10 @@ export async function buildApp() {
 
   await app.register(cors, {
     origin: (origin, cb) => {
-      // Em desenvolvimento permite requisições sem origin (Postman, curl, etc.)
       if (isDev && !origin) {
         return cb(null, true);
       }
 
-      // Em produção, requisições sem origin (ex: curl direto) são bloqueadas
-      // a menos que ALLOWED_ORIGINS esteja vazio (configuração permissiva explícita)
       if (!origin) {
         if (allowedOrigins.length === 0) return cb(null, true);
         return cb(new Error('Requisições sem origin não são permitidas em produção.'), false);
@@ -72,7 +64,6 @@ export async function buildApp() {
       cb(new Error(`Origem não permitida pelo CORS: ${origin}`), false);
     },
     credentials: true,
-    // Headers expostos para o cliente (ex: para paginação)
     exposedHeaders: ['X-Total-Count', 'X-Page', 'X-Total-Pages'],
   });
 
@@ -88,6 +79,7 @@ export async function buildApp() {
   await app.register(multipart, {
     limits: { fileSize: 10 * 1024 * 1024 },
   });
+
   // ─── Error handling ───────────────────────────────────────
   registerErrorHandler(app);
 
@@ -110,6 +102,7 @@ export async function buildApp() {
     await instance.register(menuPublicRoutes);
     await instance.register(settingsPublicRoutes);
     await instance.register(liveScoresRoutes, { prefix: '/live-scores' });
+    await instance.register(corinthiansRoutes, { prefix: '/corinthians' });
   }, { prefix: '/api' });
 
   // ─── Rotas admin (requer autenticação) ────────────────────

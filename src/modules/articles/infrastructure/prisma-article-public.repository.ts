@@ -5,10 +5,10 @@ import type { Article, PaginationParams, PaginatedResult } from '../../../shared
 import type { ListPublicArticlesFilter, SearchPublicFilter, TrendingFilter } from '../articles.types';
 
 const articleInclude = {
-  author:   { select: { id: true, name: true, avatar: true, role: true } },
+  author: { select: { id: true, name: true, avatar: true, role: true } },
   category: { select: { id: true, name: true, slug: true, color: true } },
-  tags:     { include: { tag: { select: { id: true, name: true, slug: true } } } },
-  images:   { orderBy: { order: 'asc' as const } },
+  tags: { include: { tag: { select: { id: true, name: true, slug: true } } } },
+  images: { orderBy: { order: 'asc' as const } },
 } as const;
 
 export class PrismaArticlePublicRepository implements IArticlePublicRepository {
@@ -32,14 +32,14 @@ export class PrismaArticlePublicRepository implements IArticlePublicRepository {
     { page, limit }: PaginationParams,
   ): Promise<PaginatedResult<Article>> {
     const where: any = { status: 'PUBLISHED' };
-    if (filter.category) where.category  = { slug: filter.category };
-    if (filter.type)     where.type      = filter.type;
+    if (filter.category) where.category = { slug: filter.category };
+    if (filter.type) where.type = filter.type;
     if (filter.featured) where.isFeatured = true;
     if (filter.breaking) where.isBreaking = true;
-    if (filter.tag)      where.tags       = { some: { tag: { slug: filter.tag } } };
+    if (filter.tag) where.tags = { some: { tag: { slug: filter.tag } } };
     if (filter.q) {
       where.OR = [
-        { title:   { contains: filter.q, mode: 'insensitive' } },
+        { title: { contains: filter.q, mode: 'insensitive' } },
         { excerpt: { contains: filter.q, mode: 'insensitive' } },
       ];
     }
@@ -60,25 +60,24 @@ export class PrismaArticlePublicRepository implements IArticlePublicRepository {
     filter: SearchPublicFilter,
     { page, limit }: PaginationParams,
   ): Promise<PaginatedResult<Article>> {
-    const where: any = {
-      status: 'PUBLISHED',
-      ...(filter.q && {
-        OR: [
-          { title:   { contains: filter.q, mode: 'insensitive' } },
-          { excerpt: { contains: filter.q, mode: 'insensitive' } },
-          { content: { contains: filter.q, mode: 'insensitive' } },
-        ],
-      }),
-      ...(filter.category && { category: { slug: filter.category } }),
-      ...(filter.tag      && { tags: { some: { tag: { slug: filter.tag } } } }),
-      ...(filter.type     && { type: filter.type }),
-      ...((filter.dateFrom || filter.dateTo) && {
-        publishedAt: {
-          ...(filter.dateFrom && { gte: new Date(filter.dateFrom) }),
-          ...(filter.dateTo   && { lte: new Date(filter.dateTo) }),
-        },
-      }),
-    };
+    const where: any = { status: 'PUBLISHED' };
+
+    if (filter.q) {
+      where.OR = [
+        { title: { contains: filter.q, mode: 'insensitive' } },
+        { excerpt: { contains: filter.q, mode: 'insensitive' } },
+        { content: { contains: filter.q, mode: 'insensitive' } },
+      ];
+    }
+    if (filter.category) where.category = { slug: filter.category };
+    if (filter.tag) where.tags = { some: { tag: { slug: filter.tag } } };
+    if (filter.type) where.type = filter.type;
+    if (filter.dateFrom || filter.dateTo) {
+      where.publishedAt = {
+        ...(filter.dateFrom && { gte: new Date(filter.dateFrom) }),
+        ...(filter.dateTo && { lte: new Date(filter.dateTo) }),
+      };
+    }
 
     const orderBy = filter.orderBy === 'popular'
       ? { viewCount: 'desc' as const }
@@ -92,8 +91,8 @@ export class PrismaArticlePublicRepository implements IArticlePublicRepository {
           id: true, title: true, slug: true, excerpt: true,
           coverImage: true, type: true, publishedAt: true, viewCount: true,
           category: { select: { name: true, slug: true, color: true } },
-          author:   { select: { name: true } },
-          tags:     { select: { tag: { select: { name: true, slug: true } } } },
+          author: { select: { name: true } },
+          tags: { select: { tag: { select: { name: true, slug: true } } } },
         },
       }),
       prisma.article.count({ where }),
@@ -118,8 +117,8 @@ export class PrismaArticlePublicRepository implements IArticlePublicRepository {
         id: true, title: true, slug: true, excerpt: true,
         coverImage: true, viewCount: true, publishedAt: true,
         category: { select: { name: true, slug: true, color: true } },
-        author:   { select: { name: true, avatar: true } },
-        tags:     { select: { tag: { select: { name: true, slug: true } } } },
+        author: { select: { name: true, avatar: true } },
+        tags: { select: { tag: { select: { name: true, slug: true } } } },
       },
     }) as unknown as Promise<Partial<Article>[]>;
   }
@@ -148,7 +147,7 @@ export class PrismaArticlePublicRepository implements IArticlePublicRepository {
         take: 10,
         select: {
           id: true, title: true, status: true, updatedAt: true,
-          author:   { select: { name: true } },
+          author: { select: { name: true } },
           category: { select: { name: true, slug: true } },
         },
       }),

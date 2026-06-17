@@ -1,6 +1,6 @@
 // src/modules/menu/menu.service.ts
 import type { IMenuRepository } from './menu.repository';
-import { NotFoundError, ValidationError, AppError } from '../../shared/errors';
+import { NotFoundError, ValidationError, AppError, ConflictError } from '../../shared/errors';
 import { ErrorCode } from '../../shared/errors/error-codes';
 
 const VALID_TARGETS = ['_self', '_blank'];
@@ -49,14 +49,23 @@ export class MenuService {
       }
     }
 
-    return this.repo.create({
-      label: data.label.trim(),
-      url: data.url.trim(),
-      target: data.target ?? '_self',
-      order: data.order ?? 0,
-      parentId: data.parentId ?? null,
-      isActive: true,
-    });
+    try {
+      return await this.repo.create({
+        label: data.label.trim(),
+        url: data.url.trim(),
+        target: data.target ?? '_self',
+        order: data.order ?? 0,
+        parentId: data.parentId ?? null,
+        isActive: true,
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictError(ErrorCode.MENU_LABEL_TAKEN, {
+          hint: `Já existe um item com o label "${data.label}" neste nível do menu.`,
+        });
+      }
+      throw err;
+    }
   }
 
   async update(
@@ -119,7 +128,16 @@ export class MenuService {
     if (data.parentId !== undefined) updateData.parentId = data.parentId ?? null;
     if (data.order !== undefined) updateData.order = Number(data.order);
 
-    return this.repo.update(id, updateData);
+    try {
+      return await this.repo.update(id, updateData);
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        throw new ConflictError(ErrorCode.MENU_LABEL_REQUIRED, {
+          hint: `Já existe um item com este label neste nível do menu.`,
+        });
+      }
+      throw err;
+    }
   }
 
   async delete(id: string) {

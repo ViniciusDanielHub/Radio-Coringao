@@ -82,6 +82,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   MENU_PARENT_NOT_FOUND: 'Item pai (parentId) não encontrado.',
   MENU_CIRCULAR_REFERENCE: 'Referência circular detectada: um item não pode ser pai de si mesmo.',
   MENU_MAX_DEPTH_EXCEEDED: 'Profundidade máxima de menu atingida (2 níveis).',
+  MENU_LABEL_TAKEN: 'Já existe um item com este label neste nível do menu.',
 
   // Configurações
   SETTINGS_NOT_FOUND: 'Configurações do site não encontradas.',
