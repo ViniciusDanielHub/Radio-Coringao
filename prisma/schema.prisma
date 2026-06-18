@@ -186,11 +186,12 @@ model ArticleView {
   articleId String
   article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
 
-  ipHash    String   // hash do IP do visitante — nunca o IP em texto puro
-  userAgent String?
-  viewedAt  DateTime @default(now())
+  ipHash     String   // hash do IP do visitante — nunca o IP em texto puro
+  userAgent  String?
+  viewedAt   DateTime @default(now())
+  viewBucket DateTime @db.Date // dia (UTC) truncado — usado pela constraint única
 
-  @@index([articleId, ipHash, viewedAt])
+  @@unique([articleId, ipHash, viewBucket])
   @@index([viewedAt])
   @@index([articleId])
   @@map("article_views")

@@ -1,13 +1,23 @@
 // src/modules/articles/infrastructure/prisma-article-admin.repository.ts
 //
-// ADIÇÕES nesta versão (tudo que já existia foi mantido):
-//   - getArticlesPerMonth(months)   → quantos artigos PUBLISHED e REVIEW
-//                                      por mês, últimos N meses
-//   - getReadsPerMonth(months)      → total de leituras e leitores únicos
-//                                      por mês, baseado em ArticleView
-//   - getMostReadArticle(filter)    → matéria mais lida no período
-//                                      (com leitores únicos), opcionalmente
-//                                      filtrando por mês/ano
+// CORREÇÃO DESTA VERSÃO — getMostReadArticle:
+//
+//   ANTES: fazia 2 queries que buscavam essencialmente a mesma coisa
+//   (groupBy com _count, e depois findMany com distinct) para then
+//   juntar os resultados em memória. Problemas:
+//     1. Redundante — os dois dados podem vir de uma única query SQL
+//        com COUNT(*) e COUNT(DISTINCT "ipHash").
+//     2. Risco de inconsistência: se uma nova ArticleView for inserida
+//        entre as duas queries, os números não batem mais entre si.
+//     3. Mais round-trips ao banco do que necessário.
+//
+//   AGORA: uma única query SQL raw, no mesmo estilo que já era usado
+//   em getReadsPerMonth — agrupa por articleId, agrega totalReads e
+//   uniqueReaders na mesma passada, ordena por uniqueReaders e pega o
+//   top 1. O filtro de período (from/to) é montado condicionalmente
+//   com Prisma.sql/Prisma.empty (em vez de passar `null` como parâmetro
+//   de timestamp, que é ambíguo para o driver decidir o tipo).
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../../shared/database/prisma';
 import { createSlug } from '../../../shared/services/slugify';
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
@@ -250,7 +260,7 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
   }
 
   // ════════════════════════════════════════════════════════
-  // NOVOS MÉTODOS — relatórios solicitados
+  // RELATÓRIOS
   // ════════════════════════════════════════════════════════
 
   /**
@@ -291,9 +301,10 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
 
   /**
    * Total de leituras e leitores únicos por mês, baseado em ArticleView.
-   *  - reads: total de eventos de leitura registrados (já deduplicados
-   *    por IP/24h na captura, então isso já reflete visitantes distintos
-   *    por dia).
+   *  - reads: total de registros no mês. Como cada registro já representa
+   *    no máximo 1 leitura por IP/artigo/dia (garantido pela constraint
+   *    única no banco — ver migration), isso é "visitantes-dia", não
+   *    "requisições brutas" (essas últimas estão em viewCount).
    *  - uniqueReaders: contagem de ipHash distintos no mês inteiro
    *    (uma pessoa que leu em dias diferentes do mesmo mês conta 1 vez).
    */
@@ -336,8 +347,16 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
 
   /**
    * Matéria mais lida, opcionalmente filtrando por período.
-   * "Mais lida" é definido por leitores únicos (ipHash distintos) no
+   * "Mais lida" é definida por leitores únicos (ipHash distintos) no
    * período — mais robusto que o contador simples, que conta refresh.
+   *
+   * Implementação: UMA ÚNICA query SQL agregada (substituiu o par
+   * groupBy + findMany distinct da versão anterior). O filtro de
+   * período é montado condicionalmente com Prisma.sql/Prisma.empty —
+   * evita passar `null` como parâmetro de timestamp, que é ambíguo
+   * para o driver inferir o tipo (`null::timestamp` exige cast
+   * explícito; aqui simplesmente omitimos a cláusula quando não há
+   * filtro, em vez de tentar comparar com NULL).
    *
    * Se nenhum período for informado, considera todo o histórico de
    * ArticleView. Se não houver nenhum registro em ArticleView ainda
@@ -350,53 +369,39 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
     uniqueReaders: number;
     source: 'article_views' | 'view_count_fallback';
   }> {
-    const where: any = {};
-    if (period?.from || period?.to) {
-      where.viewedAt = {
-        ...(period.from && { gte: period.from }),
-        ...(period.to && { lte: period.to }),
-      };
-    }
+    const dateFilter = Prisma.sql`
+      ${period?.from ? Prisma.sql`AND "viewedAt" >= ${period.from}` : Prisma.empty}
+      ${period?.to ? Prisma.sql`AND "viewedAt" <= ${period.to}` : Prisma.empty}
+    `;
 
-    const grouped = await prisma.articleView.groupBy({
-      by: ['articleId'],
-      where,
-      _count: { _all: true },
-    });
+    const rows = await prisma.$queryRaw<{
+      articleId: string;
+      totalReads: bigint;
+      uniqueReaders: bigint;
+    }[]>`
+      SELECT
+        "articleId",
+        COUNT(*)::bigint AS "totalReads",
+        COUNT(DISTINCT "ipHash")::bigint AS "uniqueReaders"
+      FROM "article_views"
+      WHERE true ${dateFilter}
+      GROUP BY "articleId"
+      ORDER BY "uniqueReaders" DESC, "totalReads" DESC
+      LIMIT 1
+    `;
 
-    // Buscamos leitores únicos por artigo no período — isso é o critério
-    // correto para "mais lida" quando o pedido é em termos de pessoas,
-    // não de eventos de leitura (um artigo pode ter muitos refreshes de
-    // poucas pessoas; queremos o que mais gente distinta leu).
-    const distinctViews = await prisma.articleView.findMany({
-      where,
-      select: { articleId: true, ipHash: true },
-      distinct: ['articleId', 'ipHash'],
-    });
+    const top = rows[0];
 
-    if (distinctViews.length > 0) {
-      const uniqueCountByArticle = new Map<string, number>();
-      const totalCountByArticle = new Map<string, number>();
-
-      for (const v of distinctViews) {
-        uniqueCountByArticle.set(v.articleId, (uniqueCountByArticle.get(v.articleId) ?? 0) + 1);
-      }
-      for (const g of grouped) {
-        totalCountByArticle.set(g.articleId, g._count._all);
-      }
-
-      const topArticleId = [...uniqueCountByArticle.entries()]
-        .sort((a, b) => b[1] - a[1])[0][0];
-
+    if (top) {
       const article = await prisma.article.findUnique({
-        where: { id: topArticleId },
+        where: { id: top.articleId },
         select: { id: true, title: true, slug: true },
       });
 
       return {
         article: article ?? null,
-        totalReads: totalCountByArticle.get(topArticleId) ?? 0,
-        uniqueReaders: uniqueCountByArticle.get(topArticleId) ?? 0,
+        totalReads: Number(top.totalReads),
+        uniqueReaders: Number(top.uniqueReaders),
         source: 'article_views',
       };
     }
