@@ -4,6 +4,7 @@ import type { ListArticlesUseCase } from '../use-cases/list-articles.use-case';
 import type { GetArticleBySlugUseCase } from '../use-cases/get-article-by-slug.use-case';
 import type { SearchArticlesUseCase } from '../use-cases/search-articles.use-case';
 import type { GetTrendingArticlesUseCase } from '../use-cases/get-trending-articles.use-case';
+import { getVisitorHash } from '../../../shared/services/visitor';
 
 export class ArticlePublicController {
   constructor(
@@ -19,7 +20,11 @@ export class ArticlePublicController {
 
   getBySlug = async (request: FastifyRequest, reply: FastifyReply) => {
     const { slug } = request.params as { slug: string };
-    return reply.send(await this.getBySlugUseCase.execute(slug));
+    const visitor = {
+      ipHash: getVisitorHash(request),
+      userAgent: request.headers['user-agent'],
+    };
+    return reply.send(await this.getBySlugUseCase.execute(slug, visitor));
   };
 
   search = async (request: FastifyRequest, reply: FastifyReply) => {

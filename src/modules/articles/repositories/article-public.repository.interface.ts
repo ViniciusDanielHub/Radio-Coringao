@@ -8,7 +8,11 @@ export interface IArticlePublicRepository {
   listPublic(filter: ListPublicArticlesFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
   search(filter: SearchPublicFilter, pagination: PaginationParams): Promise<PaginatedResult<Article>>;
   findTrending(filter: TrendingFilter): Promise<Partial<Article>[]>;
-  incrementViewCount(id: string): Promise<void>;
+
+  // visitorHash e userAgent são opcionais para manter compatibilidade
+  // com qualquer chamador antigo que ainda passe só o id.
+  incrementViewCount(id: string, visitorHash?: string, userAgent?: string): Promise<void>;
+
   slugExists(slug: string, excludeId?: string): Promise<boolean>;
 
   // dashboard / stats — usados também pelo DashboardService

@@ -28,4 +28,18 @@ export interface IArticleAdminRepository {
     total: number; published: number; draft: number;
     review: number; totalViews: number; last30Days: number;
   }>;
+
+  // relatórios novos
+  getArticlesPerMonth(months?: number): Promise<
+    { month: string; published: number; review: number }[]
+  >;
+  getReadsPerMonth(months?: number): Promise<
+    { month: string; reads: number; uniqueReaders: number }[]
+  >;
+  getMostReadArticle(period?: { from?: Date; to?: Date }): Promise<{
+    article: { id: string; title: string; slug: string } | null;
+    totalReads: number;
+    uniqueReaders: number;
+    source: 'article_views' | 'view_count_fallback';
+  }>;
 }

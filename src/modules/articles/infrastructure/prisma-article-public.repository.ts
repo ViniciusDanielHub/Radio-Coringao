@@ -1,4 +1,15 @@
 // src/modules/articles/infrastructure/prisma-article-public.repository.ts
+//
+// ALTERAÇÕES nesta versão:
+//   - incrementViewCount agora recebe (id, visitorHash, userAgent) em vez
+//     de só (id). Continua incrementando o contador simples (viewCount,
+//     mantém compatibilidade com o que já existia), e ADICIONALMENTE
+//     grava um registro em ArticleView para permitir relatórios por
+//     período e leitores únicos.
+//   - Dedupe: se o mesmo ipHash já leu o mesmo artigo nas últimas 24h,
+//     não grava um novo registro em ArticleView (evita inflar com refresh),
+//     mas ainda assim incrementa o viewCount simples (mantém o "views totais"
+//     como já era antes).
 import { prisma } from '../../../shared/database/prisma';
 import type { IArticlePublicRepository } from '../repositories/article-public.repository.interface';
 import type { Article, PaginationParams, PaginatedResult } from '../../../shared/entities';
@@ -10,6 +21,8 @@ const articleInclude = {
   tags: { include: { tag: { select: { id: true, name: true, slug: true } } } },
   images: { orderBy: { order: 'asc' as const } },
 } as const;
+
+const DEDUPE_WINDOW_MS = 24 * 60 * 60_000; // 24h — 1 leitura única por IP/artigo nesse intervalo
 
 export class PrismaArticlePublicRepository implements IArticlePublicRepository {
 
@@ -123,8 +136,29 @@ export class PrismaArticlePublicRepository implements IArticlePublicRepository {
     }) as unknown as Promise<Partial<Article>[]>;
   }
 
-  async incrementViewCount(id: string): Promise<void> {
+  /**
+   * Incrementa o contador simples do artigo (mantém comportamento antigo)
+   * e adicionalmente registra a leitura em ArticleView, deduplicando por
+   * IP dentro da janela de 24h — assim "leitores únicos" não é inflado
+   * por F5/recarregamentos repetidos da mesma pessoa.
+   */
+  async incrementViewCount(id: string, visitorHash?: string, userAgent?: string): Promise<void> {
     await prisma.article.update({ where: { id }, data: { viewCount: { increment: 1 } } });
+
+    // Sem hash do visitante (ex: chamada interna/legada), só incrementa o contador simples
+    if (!visitorHash) return;
+
+    const since = new Date(Date.now() - DEDUPE_WINDOW_MS);
+    const alreadyViewed = await prisma.articleView.findFirst({
+      where: { articleId: id, ipHash: visitorHash, viewedAt: { gte: since } },
+      select: { id: true },
+    });
+
+    if (alreadyViewed) return; // mesmo visitante já contabilizado nas últimas 24h
+
+    await prisma.articleView.create({
+      data: { articleId: id, ipHash: visitorHash, userAgent: userAgent?.slice(0, 255) ?? null },
+    });
   }
 
   async slugExists(slug: string, excludeId?: string): Promise<boolean> {

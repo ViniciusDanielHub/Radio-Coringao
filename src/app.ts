@@ -1,4 +1,13 @@
 // src/app.ts
+//
+// ÚNICA MUDANÇA NESTE ARQUIVO em relação ao original:
+//   Fastify({ trustProxy: true })
+//
+// Por quê: para que request.ip e o header X-Forwarded-For sejam confiáveis
+// quando a API roda atrás de um proxy/load balancer (Railway, Render,
+// Nginx, Cloudflare etc.). Sem isso, o IP capturado para as estatísticas
+// de leitura (quantas pessoas leram cada matéria) seria sempre o IP do
+// proxy, e todas as leituras pareceriam vir do mesmo "visitante".
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -26,6 +35,7 @@ import { corinthiansRoutes } from './modules/corinthians';
 export async function buildApp() {
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test',
+    trustProxy: true, // ← ADICIONADO: necessário para X-Forwarded-For / request.ip corretos
   });
 
   // ─── Security ─────────────────────────────────────────────

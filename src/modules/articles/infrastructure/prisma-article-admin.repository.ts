@@ -1,4 +1,13 @@
 // src/modules/articles/infrastructure/prisma-article-admin.repository.ts
+//
+// ADIÇÕES nesta versão (tudo que já existia foi mantido):
+//   - getArticlesPerMonth(months)   → quantos artigos PUBLISHED e REVIEW
+//                                      por mês, últimos N meses
+//   - getReadsPerMonth(months)      → total de leituras e leitores únicos
+//                                      por mês, baseado em ArticleView
+//   - getMostReadArticle(filter)    → matéria mais lida no período
+//                                      (com leitores únicos), opcionalmente
+//                                      filtrando por mês/ano
 import { prisma } from '../../../shared/database/prisma';
 import { createSlug } from '../../../shared/services/slugify';
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
@@ -238,6 +247,211 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
       totalViews: viewsAgg._sum.viewCount || 0,
       last30Days,
     };
+  }
+
+  // ════════════════════════════════════════════════════════
+  // NOVOS MÉTODOS — relatórios solicitados
+  // ════════════════════════════════════════════════════════
+
+  /**
+   * Quantidade de artigos por mês, separados por status PUBLISHED e REVIEW.
+   * Para PUBLISHED, usa publishedAt (data real de publicação).
+   * Para REVIEW, usa createdAt (não têm publishedAt ainda).
+   *
+   * Retorna os últimos `months` meses (incluindo o mês atual), do mais
+   * antigo para o mais recente, mesmo que algum mês tenha zero artigos.
+   */
+  async getArticlesPerMonth(months = 12): Promise<
+    { month: string; published: number; review: number }[]
+  > {
+    const since = new Date();
+    since.setMonth(since.getMonth() - (months - 1));
+    since.setDate(1);
+    since.setHours(0, 0, 0, 0);
+
+    const [publishedRows, reviewRows] = await Promise.all([
+      prisma.$queryRaw<{ month: Date; count: bigint }[]>`
+        SELECT date_trunc('month', "publishedAt") AS month, COUNT(*)::bigint AS count
+        FROM "articles"
+        WHERE "status" = 'PUBLISHED' AND "publishedAt" >= ${since}
+        GROUP BY 1
+        ORDER BY 1
+      `,
+      prisma.$queryRaw<{ month: Date; count: bigint }[]>`
+        SELECT date_trunc('month', "createdAt") AS month, COUNT(*)::bigint AS count
+        FROM "articles"
+        WHERE "status" = 'REVIEW' AND "createdAt" >= ${since}
+        GROUP BY 1
+        ORDER BY 1
+      `,
+    ]);
+
+    return this._mergeMonthlySeries(months, publishedRows, reviewRows);
+  }
+
+  /**
+   * Total de leituras e leitores únicos por mês, baseado em ArticleView.
+   *  - reads: total de eventos de leitura registrados (já deduplicados
+   *    por IP/24h na captura, então isso já reflete visitantes distintos
+   *    por dia).
+   *  - uniqueReaders: contagem de ipHash distintos no mês inteiro
+   *    (uma pessoa que leu em dias diferentes do mesmo mês conta 1 vez).
+   */
+  async getReadsPerMonth(months = 12): Promise<
+    { month: string; reads: number; uniqueReaders: number }[]
+  > {
+    const since = new Date();
+    since.setMonth(since.getMonth() - (months - 1));
+    since.setDate(1);
+    since.setHours(0, 0, 0, 0);
+
+    const rows = await prisma.$queryRaw<{ month: Date; reads: bigint; uniqueReaders: bigint }[]>`
+      SELECT
+        date_trunc('month', "viewedAt") AS month,
+        COUNT(*)::bigint AS reads,
+        COUNT(DISTINCT "ipHash")::bigint AS "uniqueReaders"
+      FROM "article_views"
+      WHERE "viewedAt" >= ${since}
+      GROUP BY 1
+      ORDER BY 1
+    `;
+
+    const months_: { month: string; reads: number; uniqueReaders: number }[] = [];
+    const cursor = new Date(since);
+    for (let i = 0; i < months; i++) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      const found = rows.find(r => {
+        const d = new Date(r.month);
+        return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+      });
+      months_.push({
+        month: key,
+        reads: found ? Number(found.reads) : 0,
+        uniqueReaders: found ? Number(found.uniqueReaders) : 0,
+      });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+    return months_;
+  }
+
+  /**
+   * Matéria mais lida, opcionalmente filtrando por período.
+   * "Mais lida" é definido por leitores únicos (ipHash distintos) no
+   * período — mais robusto que o contador simples, que conta refresh.
+   *
+   * Se nenhum período for informado, considera todo o histórico de
+   * ArticleView. Se não houver nenhum registro em ArticleView ainda
+   * (ex: logo após o deploy desta feature), cai para viewCount como
+   * fallback, para o admin não ver "vazio" sem necessidade.
+   */
+  async getMostReadArticle(period?: { from?: Date; to?: Date }): Promise<{
+    article: { id: string; title: string; slug: string } | null;
+    totalReads: number;
+    uniqueReaders: number;
+    source: 'article_views' | 'view_count_fallback';
+  }> {
+    const where: any = {};
+    if (period?.from || period?.to) {
+      where.viewedAt = {
+        ...(period.from && { gte: period.from }),
+        ...(period.to && { lte: period.to }),
+      };
+    }
+
+    const grouped = await prisma.articleView.groupBy({
+      by: ['articleId'],
+      where,
+      _count: { _all: true },
+    });
+
+    // Buscamos leitores únicos por artigo no período — isso é o critério
+    // correto para "mais lida" quando o pedido é em termos de pessoas,
+    // não de eventos de leitura (um artigo pode ter muitos refreshes de
+    // poucas pessoas; queremos o que mais gente distinta leu).
+    const distinctViews = await prisma.articleView.findMany({
+      where,
+      select: { articleId: true, ipHash: true },
+      distinct: ['articleId', 'ipHash'],
+    });
+
+    if (distinctViews.length > 0) {
+      const uniqueCountByArticle = new Map<string, number>();
+      const totalCountByArticle = new Map<string, number>();
+
+      for (const v of distinctViews) {
+        uniqueCountByArticle.set(v.articleId, (uniqueCountByArticle.get(v.articleId) ?? 0) + 1);
+      }
+      for (const g of grouped) {
+        totalCountByArticle.set(g.articleId, g._count._all);
+      }
+
+      const topArticleId = [...uniqueCountByArticle.entries()]
+        .sort((a, b) => b[1] - a[1])[0][0];
+
+      const article = await prisma.article.findUnique({
+        where: { id: topArticleId },
+        select: { id: true, title: true, slug: true },
+      });
+
+      return {
+        article: article ?? null,
+        totalReads: totalCountByArticle.get(topArticleId) ?? 0,
+        uniqueReaders: uniqueCountByArticle.get(topArticleId) ?? 0,
+        source: 'article_views',
+      };
+    }
+
+    // Fallback: ainda não há dados em ArticleView (ex: feature recém-ativada).
+    // Usa o contador simples viewCount, que já existia antes.
+    const fallback = await prisma.article.findFirst({
+      where: { status: 'PUBLISHED' },
+      orderBy: { viewCount: 'desc' },
+      select: { id: true, title: true, slug: true, viewCount: true },
+    });
+
+    return {
+      article: fallback ? { id: fallback.id, title: fallback.title, slug: fallback.slug } : null,
+      totalReads: fallback?.viewCount ?? 0,
+      uniqueReaders: 0, // não temos como saber "únicos" sem ArticleView
+      source: 'view_count_fallback',
+    };
+  }
+
+  // ─── Helper privado: junta as duas séries mensais (published/review) ──
+  private _mergeMonthlySeries(
+    months: number,
+    publishedRows: { month: Date; count: bigint }[],
+    reviewRows: { month: Date; count: bigint }[],
+  ): { month: string; published: number; review: number }[] {
+    const since = new Date();
+    since.setMonth(since.getMonth() - (months - 1));
+    since.setDate(1);
+
+    const result: { month: string; published: number; review: number }[] = [];
+    const cursor = new Date(since);
+
+    for (let i = 0; i < months; i++) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+
+      const pub = publishedRows.find(r => {
+        const d = new Date(r.month);
+        return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+      });
+      const rev = reviewRows.find(r => {
+        const d = new Date(r.month);
+        return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+      });
+
+      result.push({
+        month: key,
+        published: pub ? Number(pub.count) : 0,
+        review: rev ? Number(rev.count) : 0,
+      });
+
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    return result;
   }
 
   // ─── Helper privado ──────────────────────────────────────

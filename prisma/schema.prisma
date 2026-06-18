@@ -131,6 +131,7 @@ model Article {
   category        Category      @relation(fields: [categoryId], references: [id])
   tags            ArticleTag[]
   images          ArticleImage[]
+  views           ArticleView[]   // ← leituras registradas (relatórios do dashboard)
 
   // SEO
   metaTitle       String?
@@ -166,6 +167,33 @@ model ArticleImage {
   createdAt DateTime @default(now())
 
   @@map("article_images")
+}
+
+// ============================================================
+// LEITURAS DE ARTIGOS (sem cadastro de usuários no site público)
+// ============================================================
+// Cada leitura de um artigo publicado gera um registro aqui.
+// Usado para:
+//   - "quantas pessoas leram" cada matéria (leitores únicos = ipHash distintos)
+//   - "quantas leituras por mês" (relatórios do dashboard)
+//   - "qual foi a matéria mais lida" (geral ou em um período)
+//
+// O IP NUNCA é salvo em texto puro — apenas o hash (SHA-256 + salt da app),
+// por privacidade/LGPD. O hash permite identificar "é o mesmo visitante"
+// sem identificar a pessoa.
+model ArticleView {
+  id        String   @id @default(uuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  ipHash    String   // hash do IP do visitante — nunca o IP em texto puro
+  userAgent String?
+  viewedAt  DateTime @default(now())
+
+  @@index([articleId, ipHash, viewedAt])
+  @@index([viewedAt])
+  @@index([articleId])
+  @@map("article_views")
 }
 
 // ============================================================
