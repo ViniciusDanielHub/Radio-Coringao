@@ -1,14 +1,3 @@
-// src/modules/articles/category-reports.service.ts
-//
-// Orquestra os relatórios "artigos por categoria" e "mais lido por
-// categoria" nos 3 recortes de período pedidos:
-//   - thisMonth:    1º dia do mês atual  → agora
-//   - last6Months:  1º dia de 6 meses atrás → agora
-//   - thisYear:     1º de janeiro do ano atual → agora
-//
-// Cada período roda as duas queries (artigos por categoria + mais
-// lido por categoria) em paralelo, e os 3 períodos também rodam em
-// paralelo entre si — 6 queries no total, todas simultâneas.
 import type { IArticleAdminRepository } from './repositories/article-admin.repository.interface';
 import type {
   CategoryReportsResponse,
@@ -55,13 +44,17 @@ export class CategoryReportsService {
   }
 
   // ─── Rótulos de período ──────────────────────────────────────
+  //
+  // Todos os "from" abaixo são montados com Date.UTC — ver nota de
+  // correção no topo do arquivo. O "to" é sempre `now`, que já é um
+  // instante absoluto (sem ambiguidade de fuso).
 
   private _buildThisMonthLabel(now: Date): PeriodLabel {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
     const to = now;
     return {
       key: 'thisMonth',
-      label: `${MONTH_NAMES_PT[now.getMonth()]}/${now.getFullYear()}`,
+      label: `${MONTH_NAMES_PT[now.getUTCMonth()]}/${now.getUTCFullYear()}`,
       from: from.toISOString(),
       to: to.toISOString(),
     };
@@ -70,7 +63,7 @@ export class CategoryReportsService {
   private _buildLast6MonthsLabel(now: Date): PeriodLabel {
     // "Últimos 6 meses" inclui o mês atual + 5 anteriores completos,
     // mesma convenção de janela usada em getArticlesPerMonth/getReadsPerMonth.
-    const from = new Date(now.getFullYear(), now.getMonth() - 5, 1, 0, 0, 0, 0);
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1, 0, 0, 0, 0));
     const to = now;
     return {
       key: 'last6Months',
@@ -81,11 +74,11 @@ export class CategoryReportsService {
   }
 
   private _buildThisYearLabel(now: Date): PeriodLabel {
-    const from = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+    const from = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
     const to = now;
     return {
       key: 'thisYear',
-      label: String(now.getFullYear()),
+      label: String(now.getUTCFullYear()),
       from: from.toISOString(),
       to: to.toISOString(),
     };

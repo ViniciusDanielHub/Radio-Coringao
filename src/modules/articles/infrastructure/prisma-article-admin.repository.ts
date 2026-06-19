@@ -34,6 +34,33 @@
 //     período, por leitores únicos — usa DISTINCT ON para pegar o
 //     top-1 de cada categoria em uma única query (ver comentário
 //     detalhado na implementação, mais abaixo).
+//
+// CORREÇÃO DESTA VERSÃO — fuso horário (UTC) em getArticlesPerMonth /
+// getReadsPerMonth / _mergeMonthlySeries:
+//
+//   ANTES: o `since` usado para montar as chaves de mês no array de
+//   resposta era calculado com `new Date()` + `setMonth`/`setDate`,
+//   que operam no FUSO LOCAL do processo Node. Já a query SQL agrupava
+//   com `date_trunc('month', "publishedAt")`, que o Postgres trunca
+//   por padrão na timezone DA SESSÃO/CONEXÃO (geralmente UTC, mas
+//   depende da configuração do banco/driver). Se o fuso local do
+//   processo Node não fosse UTC, um artigo publicado nos primeiros ou
+//   últimos dias do mês podia "cair" em um mês diferente no SQL do que
+//   no array final montado em JS — exatamente o sintoma observado
+//   (artigo com publishedAt em 17/06 aparecendo agrupado em "2026-05").
+//
+//   AGORA: tudo passa a operar em UTC, ponta a ponta:
+//     1. `since` é construído com `Date.UTC(...)` em vez de
+//        `setMonth`/`setDate` (que usam o fuso local).
+//     2. `date_trunc('month', "coluna", 'UTC')` — terceiro argumento
+//        explícito força o truncamento em UTC, independente da
+//        timezone da sessão Postgres.
+//     3. O cursor que monta as chaves "YYYY-MM" do array de resposta
+//        usa `getUTCFullYear()` / `getUTCMonth()` / `setUTCMonth()`,
+//        e a comparação com as linhas vindas do banco também usa
+//        `getUTCFullYear()` / `getUTCMonth()` em vez das variantes
+//        locais. Assim a chave gerada em JS e o mês truncado no SQL
+//        sempre se referem ao mesmo "mês UTC".
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../shared/database/prisma';
 import { createSlug } from '../../../shared/services/slugify';
@@ -48,6 +75,18 @@ const articleInclude = {
   tags: { include: { tag: { select: { id: true, name: true, slug: true } } } },
   images: { orderBy: { order: 'asc' as const } },
 } as const;
+
+// ─── Helper: 1º dia do mês, N meses atrás, em UTC ─────────────
+// Substitui o padrão antigo (new Date() + setMonth/setDate, que usa
+// o fuso LOCAL do processo) por um cálculo inteiramente em UTC, para
+// bater exatamente com o date_trunc(..., 'UTC') usado nas queries.
+function utcMonthsAgoStart(monthsAgo: number, base: Date = new Date()): Date {
+  return new Date(Date.UTC(
+    base.getUTCFullYear(),
+    base.getUTCMonth() - monthsAgo,
+    1, 0, 0, 0, 0,
+  ));
+}
 
 export class PrismaArticleAdminRepository implements IArticleAdminRepository {
 
@@ -288,25 +327,26 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
    *
    * Retorna os últimos `months` meses (incluindo o mês atual), do mais
    * antigo para o mais recente, mesmo que algum mês tenha zero artigos.
+   *
+   * Tudo em UTC (ver nota de correção no topo do arquivo) — `since` é
+   * calculado com Date.UTC, e o agrupamento SQL usa
+   * date_trunc('month', coluna, 'UTC').
    */
   async getArticlesPerMonth(months = 12): Promise<
     { month: string; published: number; review: number }[]
   > {
-    const since = new Date();
-    since.setMonth(since.getMonth() - (months - 1));
-    since.setDate(1);
-    since.setHours(0, 0, 0, 0);
+    const since = utcMonthsAgoStart(months - 1);
 
     const [publishedRows, reviewRows] = await Promise.all([
       prisma.$queryRaw<{ month: Date; count: bigint }[]>`
-        SELECT date_trunc('month', "publishedAt") AS month, COUNT(*)::bigint AS count
+        SELECT date_trunc('month', "publishedAt", 'UTC') AS month, COUNT(*)::bigint AS count
         FROM "articles"
         WHERE "status" = 'PUBLISHED' AND "publishedAt" >= ${since}
         GROUP BY 1
         ORDER BY 1
       `,
       prisma.$queryRaw<{ month: Date; count: bigint }[]>`
-        SELECT date_trunc('month', "createdAt") AS month, COUNT(*)::bigint AS count
+        SELECT date_trunc('month', "createdAt", 'UTC') AS month, COUNT(*)::bigint AS count
         FROM "articles"
         WHERE "status" = 'REVIEW' AND "createdAt" >= ${since}
         GROUP BY 1
@@ -325,18 +365,17 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
    *    "requisições brutas" (essas últimas estão em viewCount).
    *  - uniqueReaders: contagem de ipHash distintos no mês inteiro
    *    (uma pessoa que leu em dias diferentes do mesmo mês conta 1 vez).
+   *
+   * Tudo em UTC — mesmo motivo de getArticlesPerMonth.
    */
   async getReadsPerMonth(months = 12): Promise<
     { month: string; reads: number; uniqueReaders: number }[]
   > {
-    const since = new Date();
-    since.setMonth(since.getMonth() - (months - 1));
-    since.setDate(1);
-    since.setHours(0, 0, 0, 0);
+    const since = utcMonthsAgoStart(months - 1);
 
     const rows = await prisma.$queryRaw<{ month: Date; reads: bigint; uniqueReaders: bigint }[]>`
       SELECT
-        date_trunc('month', "viewedAt") AS month,
+        date_trunc('month', "viewedAt", 'UTC') AS month,
         COUNT(*)::bigint AS reads,
         COUNT(DISTINCT "ipHash")::bigint AS "uniqueReaders"
       FROM "article_views"
@@ -348,17 +387,17 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
     const months_: { month: string; reads: number; uniqueReaders: number }[] = [];
     const cursor = new Date(since);
     for (let i = 0; i < months; i++) {
-      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`;
       const found = rows.find(r => {
         const d = new Date(r.month);
-        return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+        return d.getUTCFullYear() === cursor.getUTCFullYear() && d.getUTCMonth() === cursor.getUTCMonth();
       });
       months_.push({
         month: key,
         reads: found ? Number(found.reads) : 0,
         uniqueReaders: found ? Number(found.uniqueReaders) : 0,
       });
-      cursor.setMonth(cursor.getMonth() + 1);
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
     }
     return months_;
   }
@@ -447,19 +486,19 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
   /**
    * Quantos artigos têm scheduledAt caindo dentro do mês corrente.
    *
-   * Critério: scheduledAt entre o início e o fim do mês atual (local
-   * ao processo do servidor — mesma convenção usada em getStats /
-   * dashboard.service para "startOfMonth"). Não filtra por status:
-   * um artigo agendado normalmente está em DRAFT ou REVIEW até o
-   * scheduler publicá-lo (ver scheduler.worker.ts), mas a contagem
-   * aqui responde literalmente "quantos estão agendados para publicar
-   * ainda neste mês" — incluindo casos-limite onde scheduledAt foi
-   * setado mas o status ainda não mudou.
+   * Critério: scheduledAt entre o início e o fim do mês atual, em UTC
+   * (consistente com o restante dos relatórios mensais deste arquivo —
+   * ver nota de correção no topo). Não filtra por status: um artigo
+   * agendado normalmente está em DRAFT ou REVIEW até o scheduler
+   * publicá-lo (ver scheduler.worker.ts), mas a contagem aqui responde
+   * literalmente "quantos estão agendados para publicar ainda neste
+   * mês" — incluindo casos-limite onde scheduledAt foi setado mas o
+   * status ainda não mudou.
    */
   async countScheduledThisMonth(): Promise<number> {
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+    const startOfNextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
 
     return prisma.article.count({
       where: {
@@ -488,12 +527,13 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
   /**
    * Total de artigos PUBLISHED cujo publishedAt está no ano corrente.
    * Usa publishedAt (data real de publicação) e não createdAt, para
-   * ficar consistente com getArticlesPerMonth.
+   * ficar consistente com getArticlesPerMonth. Limites do ano em UTC,
+   * pelo mesmo motivo de countScheduledThisMonth.
    */
   async countPublishedThisYear(): Promise<number> {
     const now = new Date();
-    const startOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-    const startOfNextYear = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
+    const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
+    const startOfNextYear = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1, 0, 0, 0, 0));
 
     return prisma.article.count({
       where: {
@@ -531,6 +571,11 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
   //   — que é exatamente "ranqueia dentro do grupo e pega o nº 1",
   //   sem precisar de window function (ROW_NUMBER) nem de N queries
   //   (uma por categoria).
+  //
+  // Nota: aqui não há agrupamento por mês (date_trunc), então não há
+  // o mesmo risco de fuso horário do getArticlesPerMonth — o filtro
+  // de período (from/to) é só um WHERE de intervalo, e quem decide os
+  // limites do período é o CategoryReportsService.
 
   async getArticlesByCategory(
     period: { from: Date; to: Date },
@@ -617,28 +662,31 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
   }
 
   // ─── Helper privado: junta as duas séries mensais (published/review) ──
+  //
+  // Em UTC (ver nota de correção no topo): `since` vem de
+  // utcMonthsAgoStart, e o cursor usado para gerar as chaves "YYYY-MM"
+  // e para comparar com as linhas do banco usa exclusivamente os
+  // getters/setters UTC (getUTCFullYear, getUTCMonth, setUTCMonth).
   private _mergeMonthlySeries(
     months: number,
     publishedRows: { month: Date; count: bigint }[],
     reviewRows: { month: Date; count: bigint }[],
   ): { month: string; published: number; review: number }[] {
-    const since = new Date();
-    since.setMonth(since.getMonth() - (months - 1));
-    since.setDate(1);
+    const since = utcMonthsAgoStart(months - 1);
 
     const result: { month: string; published: number; review: number }[] = [];
     const cursor = new Date(since);
 
     for (let i = 0; i < months; i++) {
-      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`;
 
       const pub = publishedRows.find(r => {
         const d = new Date(r.month);
-        return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+        return d.getUTCFullYear() === cursor.getUTCFullYear() && d.getUTCMonth() === cursor.getUTCMonth();
       });
       const rev = reviewRows.find(r => {
         const d = new Date(r.month);
-        return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+        return d.getUTCFullYear() === cursor.getUTCFullYear() && d.getUTCMonth() === cursor.getUTCMonth();
       });
 
       result.push({
@@ -647,7 +695,7 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
         review: rev ? Number(rev.count) : 0,
       });
 
-      cursor.setMonth(cursor.getMonth() + 1);
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
     }
 
     return result;
