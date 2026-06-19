@@ -6,6 +6,8 @@ import type { JwtService } from '../../shared/services/jwt';
 import { UnauthorizedError, ValidationError } from '../../shared/errors';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { blacklistToken } from '../../shared/services/token-blacklist';
+import { presenceService, PresenceService } from '../presence/presence.service';
+
 
 export class AuthService {
   constructor(
@@ -46,6 +48,10 @@ export class AuthService {
       userId: user.id,
       expiresAt: this.jwtService.getRefreshExpiryDate(),
     });
+
+    // ── Registra presença: lastLoginAt + lastSeenAt ──
+    // fire-and-forget — não bloqueia a resposta de login se o banco estiver lento
+    presenceService.onLogin(user.id).catch((err) => console.error('PRESENCE ERROR:', err));
 
     const { password: _, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, accessToken, refreshToken };
@@ -93,17 +99,26 @@ export class AuthService {
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
-  async logout(refreshToken?: string, accessTokenJti?: string, accessTokenExp?: number) {
+  // userId é o 4º parâmetro novo — preenchido pelo AuthController via request.user.id
+  async logout(
+    refreshToken?: string,
+    accessTokenJti?: string,
+    accessTokenExp?: number,
+    userId?: string,
+  ) {
     // ── Revoga o refresh token ──
     if (refreshToken && refreshToken.trim() !== '') {
       await this.tokenRepo.deleteByToken(refreshToken).catch(() => { });
     }
 
     // ── Blacklista o access token para invalidação imediata ──
-    // Mesmo que o access token ainda não tenha expirado, ele será rejeitado
-    // em qualquer requisição subsequente.
     if (accessTokenJti && accessTokenExp) {
       await blacklistToken(accessTokenJti, accessTokenExp * 1000).catch(() => { });
+    }
+
+    // ── Registra saída: lastLogoutAt ──
+    if (userId) {
+      presenceService.onLogout(userId).catch(() => { });
     }
 
     return { message: 'Logout realizado com sucesso.' };
@@ -118,6 +133,6 @@ export class AuthService {
     if (!user.isActive) throw new UnauthorizedError(ErrorCode.AUTH_USER_INACTIVE);
 
     const { password: _, ...rest } = user;
-    return rest;
+    return PresenceService.withPresence(rest);
   }
 }

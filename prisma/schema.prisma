@@ -33,6 +33,9 @@ model User {
   bio          String?
   position     String?  // Cargo exibível (ex: "Editor-Chefe", "Repórter")
   isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  lastLogoutAt DateTime?
+  lastSeenAt   DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

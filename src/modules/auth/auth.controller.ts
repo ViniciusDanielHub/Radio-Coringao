@@ -20,11 +20,11 @@ export class AuthController {
   logout = async (request: FastifyRequest, reply: FastifyReply) => {
     const { refreshToken } = request.body as { refreshToken?: string };
 
-    // Recupera jti e exp do access token armazenados pelo middleware authenticate
     const jti = (request as any).tokenJti as string | undefined;
     const exp = (request as any).tokenExp as number | undefined;
 
-    const result = await this.authService.logout(refreshToken, jti, exp);
+    // ← passa o userId do token autenticado para gravar lastLogoutAt
+    const result = await this.authService.logout(refreshToken, jti, exp, request.user.id);
     return reply.send(result);
   };
 

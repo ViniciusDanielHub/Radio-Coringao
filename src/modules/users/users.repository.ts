@@ -35,9 +35,21 @@ export class UserRepository implements IUserRepository {
       prisma.user.findMany({
         where,
         select: {
-          id: true, name: true, email: true, role: true,
-          avatar: true, bio: true, position: true, // <-- position incluído
-          isActive: true, createdAt: true, updatedAt: true,
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          avatar: true,
+          bio: true,
+          position: true,
+          isActive: true,
+          // ── Presença ──────────────────────────────────────────
+          lastLoginAt: true,
+          lastLogoutAt: true,
+          lastSeenAt: true,
+          // ─────────────────────────────────────────────────────
+          createdAt: true,
+          updatedAt: true,
           password: false,
           _count: { select: { articles: true } },
         },
@@ -48,7 +60,13 @@ export class UserRepository implements IUserRepository {
       prisma.user.count({ where }),
     ]);
 
-    return { data: data as unknown as User[], total, page, limit, totalPages: Math.ceil(total / limit) };
+    return {
+      data: data as unknown as User[],
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async create(data: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {

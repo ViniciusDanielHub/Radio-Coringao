@@ -34,6 +34,9 @@ export interface User {
   bio?: string | null;
   position?: string | null;
   isActive: boolean;
+  lastLoginAt?: Date | null;
+  lastLogoutAt?: Date | null;
+  lastSeenAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
