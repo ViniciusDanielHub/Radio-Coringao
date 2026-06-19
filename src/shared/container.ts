@@ -37,6 +37,7 @@ import { BannerService } from '../modules/banners/banners.service';
 import { MenuService } from '../modules/menu/menu.service';
 import { SettingsService } from '../modules/settings/settings.service';
 import { DashboardService } from '../modules/dashboard/dashboard.service';
+import { CategoryReportsService } from '../modules/articles/category-reports.service';
 
 // ─── Controllers ─────────────────────────────────────────────
 import { ArticlePublicController } from '../modules/articles/public/articles-public.controller';
@@ -49,6 +50,7 @@ import { BannerController } from '../modules/banners/banners.controller';
 import { MenuController } from '../modules/menu/menu.controller';
 import { SettingsController } from '../modules/settings/settings.controller';
 import { DashboardController } from '../modules/dashboard/dashboard.controller';
+import { CategoryReportsController } from '../modules/articles/category-reports.controller';
 import { LiveScoresController } from '../modules/live-scores/live-scores.controller';
 import { LiveScoresService } from '../modules/live-scores/live-scores.service';
 
@@ -94,6 +96,7 @@ const bannerService = new BannerService(bannerRepo);
 const menuService = new MenuService(menuRepo);
 const settingsService = new SettingsService(settingsRepo);
 const dashboardService = new DashboardService(articleAdminRepo, userRepo, categoryRepo);
+const categoryReportsService = new CategoryReportsService(articleAdminRepo);
 const liveScoresService = new LiveScoresService();
 
 // ═══════════════════════════════════════════════════════════════
@@ -103,7 +106,7 @@ export const articlePublicController = new ArticlePublicController(
   listArticlesUseCase,
   getArticleBySlugUseCase,
   searchArticlesUseCase,
-  getTrendingArticlesUseCase, 
+  getTrendingArticlesUseCase,
 );
 
 export const articleAdminController = new ArticleAdminController(
@@ -126,4 +129,5 @@ export const bannerController = new BannerController(bannerService);
 export const menuController = new MenuController(menuService);
 export const settingsController = new SettingsController(settingsService);
 export const dashboardController = new DashboardController(dashboardService);
+export const categoryReportsController = new CategoryReportsController(categoryReportsService);
 export const liveScoresController = new LiveScoresController(liveScoresService);

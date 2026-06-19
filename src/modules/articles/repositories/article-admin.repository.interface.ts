@@ -1,6 +1,7 @@
 // src/modules/articles/repositories/article-admin.repository.interface.ts
 import type { Article, ArticleImage, PaginationParams, PaginatedResult } from '../../../shared/entities';
 import type { ListAdminArticlesFilter, SearchAdminFilter } from '../articles.types';
+import type { CategoryArticleCount, CategoryMostRead } from '../category-reports.types';
 
 export interface IArticleAdminRepository {
   // leitura
@@ -50,4 +51,23 @@ export interface IArticleAdminRepository {
   countPending(): Promise<{ draft: number; review: number; total: number }>;
   /** Conta artigos PUBLISHED com publishedAt no ano atual */
   countPublishedThisYear(): Promise<number>;
+
+  // ── relatórios por categoria ──────────────────────────────
+  /**
+   * Quantidade de artigos PUBLISHED por categoria, com publishedAt
+   * dentro do período informado. Mesmo critério de getArticlesPerMonth,
+   * mas agrupado por categoria em vez de por mês.
+   * Categorias sem nenhum artigo publicado no período não aparecem
+   * no resultado (em vez de aparecer com count: 0).
+   */
+  getArticlesByCategory(period: { from: Date; to: Date }): Promise<CategoryArticleCount[]>;
+
+  /**
+   * Matéria mais lida de CADA categoria, dentro do período informado.
+   * "Mais lida" = mais leitores únicos (ipHash distintos) no período,
+   * mesmo critério de getMostReadArticle. Empate é desfeito por
+   * totalReads. Categorias sem nenhuma leitura registrada no período
+   * não aparecem no resultado.
+   */
+  getMostReadByCategory(period: { from: Date; to: Date }): Promise<CategoryMostRead[]>;
 }

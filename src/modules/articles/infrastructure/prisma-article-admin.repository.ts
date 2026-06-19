@@ -24,12 +24,23 @@
 //   - countPending: artigos em DRAFT ou REVIEW (pendentes de publicação).
 //   - countPublishedThisYear: total de artigos PUBLISHED cujo
 //     publishedAt cai no ano corrente.
+//
+// ADIÇÕES DESTA VERSÃO — relatórios por categoria:
+//   - getArticlesByCategory: artigos PUBLISHED agrupados por categoria,
+//     dentro de um período arbitrário (mês/6 meses/ano — decidido pelo
+//     Service). Mesmo critério de getArticlesPerMonth, agrupado por
+//     categoria em vez de por mês.
+//   - getMostReadByCategory: a matéria mais lida de CADA categoria no
+//     período, por leitores únicos — usa DISTINCT ON para pegar o
+//     top-1 de cada categoria em uma única query (ver comentário
+//     detalhado na implementação, mais abaixo).
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../shared/database/prisma';
 import { createSlug } from '../../../shared/services/slugify';
 import type { IArticleAdminRepository } from '../repositories/article-admin.repository.interface';
 import type { Article, ArticleImage, PaginationParams, PaginatedResult } from '../../../shared/entities';
 import type { ListAdminArticlesFilter, SearchAdminFilter } from '../articles.types';
+import type { CategoryArticleCount, CategoryMostRead } from '../category-reports.types';
 
 const articleInclude = {
   author: { select: { id: true, name: true, avatar: true, role: true } },
@@ -493,6 +504,116 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
         },
       },
     });
+  }
+
+  // ════════════════════════════════════════════════════════
+  // RELATÓRIOS POR CATEGORIA
+  // ════════════════════════════════════════════════════════
+  //
+  // Os dois métodos abaixo respondem, para um período arbitrário
+  // (mês atual / últimos 6 meses / ano atual — decidido pelo Service):
+  //
+  //   1. getArticlesByCategory  → quantos artigos PUBLISHED cada
+  //      categoria teve, usando publishedAt (mesmo critério já usado
+  //      em getArticlesPerMonth, agora agrupado por categoria em vez
+  //      de por mês).
+  //
+  //   2. getMostReadByCategory  → a matéria mais lida de CADA
+  //      categoria no período, usando leitores únicos (ipHash
+  //      distintos em ArticleView), mesmo critério já usado em
+  //      getMostReadArticle.
+  //
+  // Por que DISTINCT ON em vez de GROUP BY + LIMIT por categoria?
+  //   GROUP BY articleId (como em getMostReadArticle) só dá o top-1
+  //   GERAL. Para "top-1 de CADA categoria" em uma única query, o
+  //   Postgres tem DISTINCT ON: agrupa por categoryId e, dentro de
+  //   cada grupo, mantém apenas a primeira linha conforme o ORDER BY
+  //   — que é exatamente "ranqueia dentro do grupo e pega o nº 1",
+  //   sem precisar de window function (ROW_NUMBER) nem de N queries
+  //   (uma por categoria).
+
+  async getArticlesByCategory(
+    period: { from: Date; to: Date },
+  ): Promise<CategoryArticleCount[]> {
+    const rows = await prisma.$queryRaw<{
+      categoryId: string;
+      categoryName: string;
+      categorySlug: string;
+      categoryColor: string | null;
+      count: bigint;
+    }[]>`
+      SELECT
+        c."id"    AS "categoryId",
+        c."name"  AS "categoryName",
+        c."slug"  AS "categorySlug",
+        c."color" AS "categoryColor",
+        COUNT(a."id")::bigint AS count
+      FROM "articles" a
+      INNER JOIN "categories" c ON c."id" = a."categoryId"
+      WHERE a."status" = 'PUBLISHED'
+        AND a."publishedAt" >= ${period.from}
+        AND a."publishedAt" <= ${period.to}
+      GROUP BY c."id", c."name", c."slug", c."color"
+      ORDER BY count DESC
+    `;
+
+    return rows.map((r) => ({
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      categorySlug: r.categorySlug,
+      categoryColor: r.categoryColor,
+      count: Number(r.count),
+    }));
+  }
+
+  async getMostReadByCategory(
+    period: { from: Date; to: Date },
+  ): Promise<CategoryMostRead[]> {
+    const rows = await prisma.$queryRaw<{
+      categoryId: string;
+      categoryName: string;
+      categorySlug: string;
+      categoryColor: string | null;
+      articleId: string;
+      articleTitle: string;
+      articleSlug: string;
+      totalReads: bigint;
+      uniqueReaders: bigint;
+    }[]>`
+      SELECT DISTINCT ON (c."id")
+        c."id"    AS "categoryId",
+        c."name"  AS "categoryName",
+        c."slug"  AS "categorySlug",
+        c."color" AS "categoryColor",
+        a."id"    AS "articleId",
+        a."title" AS "articleTitle",
+        a."slug"  AS "articleSlug",
+        v."totalReads",
+        v."uniqueReaders"
+      FROM (
+        SELECT
+          "articleId",
+          COUNT(*)::bigint AS "totalReads",
+          COUNT(DISTINCT "ipHash")::bigint AS "uniqueReaders"
+        FROM "article_views"
+        WHERE "viewedAt" >= ${period.from}
+          AND "viewedAt" <= ${period.to}
+        GROUP BY "articleId"
+      ) v
+      INNER JOIN "articles" a ON a."id" = v."articleId"
+      INNER JOIN "categories" c ON c."id" = a."categoryId"
+      ORDER BY c."id", v."uniqueReaders" DESC, v."totalReads" DESC
+    `;
+
+    return rows.map((r) => ({
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      categorySlug: r.categorySlug,
+      categoryColor: r.categoryColor,
+      article: { id: r.articleId, title: r.articleTitle, slug: r.articleSlug },
+      totalReads: Number(r.totalReads),
+      uniqueReaders: Number(r.uniqueReaders),
+    }));
   }
 
   // ─── Helper privado: junta as duas séries mensais (published/review) ──

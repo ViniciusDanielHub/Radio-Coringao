@@ -8,6 +8,10 @@
 // Nginx, Cloudflare etc.). Sem isso, o IP capturado para as estatísticas
 // de leitura (quantas pessoas leram cada matéria) seria sempre o IP do
 // proxy, e todas as leituras pareceriam vir do mesmo "visitante".
+//
+// ADIÇÃO: registro de categoryReportsRoutes no bloco admin, expondo
+// GET /api/admin/dashboard/categories (artigos por categoria + mais
+// lido por categoria, nos períodos mês atual / últimos 6 meses / ano).
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -27,6 +31,7 @@ import { bannerPublicRoutes, bannerAdminRoutes } from './modules/banners/banners
 import { menuPublicRoutes, menuAdminRoutes } from './modules/menu/menu.routes';
 import { settingsPublicRoutes, settingsAdminRoutes } from './modules/settings/settings.routes';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes';
+import { categoryReportsRoutes } from './modules/articles/category-reports.routes';
 import { articlePublicRoutes } from './modules/articles/public/articles-public.routes';
 import { articleAdminRoutes } from './modules/articles/admin/articles-admin.routes';
 import { liveScoresRoutes } from './modules/live-scores';
@@ -121,6 +126,7 @@ export async function buildApp() {
     instance.addHook('preHandler', authenticate);
 
     await instance.register(dashboardRoutes);
+    await instance.register(categoryReportsRoutes);
     await instance.register(userRoutes);
     await instance.register(articleAdminRoutes);
     await instance.register(categoryAdminRoutes);
