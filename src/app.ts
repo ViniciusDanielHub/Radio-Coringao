@@ -31,6 +31,7 @@ import { articlePublicRoutes } from './modules/articles/public/articles-public.r
 import { articleAdminRoutes } from './modules/articles/admin/articles-admin.routes';
 import { liveScoresRoutes } from './modules/live-scores';
 import { corinthiansRoutes } from './modules/corinthians';
+import { presenceRoutes } from './modules/presence/presence.routes';
 
 export async function buildApp() {
   const app = Fastify({
@@ -127,6 +128,7 @@ export async function buildApp() {
     await instance.register(bannerAdminRoutes);
     await instance.register(menuAdminRoutes);
     await instance.register(settingsAdminRoutes);
+    await instance.register(presenceRoutes);
   }, { prefix: '/api/admin' });
 
   return app;

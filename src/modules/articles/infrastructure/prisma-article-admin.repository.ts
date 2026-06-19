@@ -17,6 +17,13 @@
 //   top 1. O filtro de período (from/to) é montado condicionalmente
 //   com Prisma.sql/Prisma.empty (em vez de passar `null` como parâmetro
 //   de timestamp, que é ambíguo para o driver decidir o tipo).
+//
+// ADIÇÕES DESTA VERSÃO — 3 novas métricas de dashboard:
+//   - countScheduledThisMonth: artigos com scheduledAt dentro do mês
+//     corrente (ainda não publicados — status DRAFT/REVIEW agendados).
+//   - countPending: artigos em DRAFT ou REVIEW (pendentes de publicação).
+//   - countPublishedThisYear: total de artigos PUBLISHED cujo
+//     publishedAt cai no ano corrente.
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../shared/database/prisma';
 import { createSlug } from '../../../shared/services/slugify';
@@ -420,6 +427,72 @@ export class PrismaArticleAdminRepository implements IArticleAdminRepository {
       uniqueReaders: 0, // não temos como saber "únicos" sem ArticleView
       source: 'view_count_fallback',
     };
+  }
+
+  // ════════════════════════════════════════════════════════
+  // NOVAS MÉTRICAS DE DASHBOARD
+  // ════════════════════════════════════════════════════════
+
+  /**
+   * Quantos artigos têm scheduledAt caindo dentro do mês corrente.
+   *
+   * Critério: scheduledAt entre o início e o fim do mês atual (local
+   * ao processo do servidor — mesma convenção usada em getStats /
+   * dashboard.service para "startOfMonth"). Não filtra por status:
+   * um artigo agendado normalmente está em DRAFT ou REVIEW até o
+   * scheduler publicá-lo (ver scheduler.worker.ts), mas a contagem
+   * aqui responde literalmente "quantos estão agendados para publicar
+   * ainda neste mês" — incluindo casos-limite onde scheduledAt foi
+   * setado mas o status ainda não mudou.
+   */
+  async countScheduledThisMonth(): Promise<number> {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+
+    return prisma.article.count({
+      where: {
+        scheduledAt: {
+          gte: startOfMonth,
+          lt: startOfNextMonth,
+        },
+        status: { in: ['DRAFT', 'REVIEW'] },
+      },
+    });
+  }
+
+  /**
+   * Artigos pendentes: em DRAFT (rascunho) ou REVIEW (aguardando revisão).
+   * Retorna a quebra por status além do total, para o dashboard poder
+   * exibir tanto o número agregado quanto o detalhe.
+   */
+  async countPending(): Promise<{ draft: number; review: number; total: number }> {
+    const [draft, review] = await Promise.all([
+      prisma.article.count({ where: { status: 'DRAFT' } }),
+      prisma.article.count({ where: { status: 'REVIEW' } }),
+    ]);
+    return { draft, review, total: draft + review };
+  }
+
+  /**
+   * Total de artigos PUBLISHED cujo publishedAt está no ano corrente.
+   * Usa publishedAt (data real de publicação) e não createdAt, para
+   * ficar consistente com getArticlesPerMonth.
+   */
+  async countPublishedThisYear(): Promise<number> {
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+    const startOfNextYear = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0);
+
+    return prisma.article.count({
+      where: {
+        status: 'PUBLISHED',
+        publishedAt: {
+          gte: startOfYear,
+          lt: startOfNextYear,
+        },
+      },
+    });
   }
 
   // ─── Helper privado: junta as duas séries mensais (published/review) ──

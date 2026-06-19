@@ -42,4 +42,12 @@ export interface IArticleAdminRepository {
     uniqueReaders: number;
     source: 'article_views' | 'view_count_fallback';
   }>;
+
+  // ── novas features ──────────────────────────────────────
+  /** Conta artigos com scheduledAt dentro do mês atual (ainda não publicados) */
+  countScheduledThisMonth(): Promise<number>;
+  /** Conta artigos com status DRAFT ou REVIEW (pendentes) */
+  countPending(): Promise<{ draft: number; review: number; total: number }>;
+  /** Conta artigos PUBLISHED com publishedAt no ano atual */
+  countPublishedThisYear(): Promise<number>;
 }

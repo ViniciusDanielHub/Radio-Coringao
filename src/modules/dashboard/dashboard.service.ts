@@ -5,6 +5,10 @@
 //   - readsPerMonth: leituras totais e leitores únicos, mês a mês
 //   - mostReadArticle: matéria mais lida (geral, sem filtro de período)
 //     e mostReadArticleThisMonth (mesmo critério, restrito ao mês atual)
+//   - scheduledThisMonth: quantos artigos estão agendados para publicar
+//     ainda neste mês
+//   - pending: artigos pendentes (DRAFT + REVIEW), com quebra por status
+//   - publishedThisYear: total de artigos publicados no ano atual (número)
 import type { IArticleAdminRepository } from '../articles/repositories/article-admin.repository.interface';
 import type { IUserRepository } from '../users/users.repository';
 import type { ICategoryRepository } from '../categories/categories.repository';
@@ -29,6 +33,9 @@ export class DashboardService {
       readsPerMonth,
       mostReadArticle,
       mostReadArticleThisMonth,
+      scheduledThisMonth,
+      pending,
+      publishedThisYear,
     ] = await Promise.all([
       this.articleRepo.aggregateStats(),
       this.articleRepo.findForDashboard(),
@@ -40,6 +47,9 @@ export class DashboardService {
       this.articleRepo.getReadsPerMonth(12),
       this.articleRepo.getMostReadArticle(),
       this.articleRepo.getMostReadArticle({ from: startOfMonth }),
+      this.articleRepo.countScheduledThisMonth(),
+      this.articleRepo.countPending(),
+      this.articleRepo.countPublishedThisYear(),
     ]);
 
     return {
@@ -51,6 +61,9 @@ export class DashboardService {
       readsPerMonth,
       mostReadArticle,
       mostReadArticleThisMonth,
+      scheduledThisMonth,
+      pending,
+      publishedThisYear,
     };
   }
 }
