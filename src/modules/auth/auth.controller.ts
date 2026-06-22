@@ -20,8 +20,8 @@ export class AuthController {
   logout = async (request: FastifyRequest, reply: FastifyReply) => {
     const { refreshToken } = request.body as { refreshToken?: string };
 
-    const jti = (request as any).tokenJti as string | undefined;
-    const exp = (request as any).tokenExp as number | undefined;
+    const jti = request.tokenJti;
+    const exp = request.tokenExp;
 
     // ← passa o userId do token autenticado para gravar lastLogoutAt
     const result = await this.authService.logout(refreshToken, jti, exp, request.user.id);

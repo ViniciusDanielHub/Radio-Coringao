@@ -123,8 +123,12 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   };
 
   // Armazena jti e exp para uso no logout
-  (request as any).tokenJti = decoded.jti;
-  (request as any).tokenExp = decoded.exp;
+  request.tokenJti = decoded.jti;
+  request.tokenExp = decoded.exp;
+
+  // Armazena o token bruto para repassar a APIs internas que confiam no
+  // mesmo JWT_SECRET (ex: clube-api) — ver shared/services/clube-api/http.ts
+  request.accessToken = token;
 }
 
 export function authorize(...roles: Role[]) {

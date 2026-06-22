@@ -23,5 +23,11 @@ declare module 'fastify' {
       mimetype: string;
       fieldname: string;
     };
+    /** JWT bruto do admin autenticado — usado para repassar a APIs internas (ex: clube-api) */
+    accessToken?: string;
+    /** JWT ID do access token atual — usado no logout para blacklist */
+    tokenJti?: string;
+    /** Timestamp de expiração (epoch, segundos) do access token atual */
+    tokenExp?: number;
   }
 }
