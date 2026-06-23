@@ -38,3 +38,10 @@ export class SponsorRepository implements ISponsorRepository {
   }
 
   async update(id: string, data: Partial<Sponsor>): Promise<Sponsor> {
+    return prisma.sponsor.update({ where: { id }, data }) as Promise<Sponsor>;
+  }
+
+  async delete(id: string): Promise<void> {
+    await prisma.sponsor.delete({ where: { id } });
+  }
+}

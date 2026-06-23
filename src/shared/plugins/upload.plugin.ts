@@ -35,6 +35,8 @@ const DIMENSION_LIMITS: Record<UploadFolder, DimensionLimits> = {
   articles: { minWidth: 400, minHeight: 200, maxWidth: 8000, maxHeight: 8000 },
   avatars: { minWidth: 50, minHeight: 50, maxWidth: 4000, maxHeight: 4000 },
   banners: { minWidth: 800, minHeight: 200, maxWidth: 8000, maxHeight: 4000 },
+  events: { minWidth: 400, minHeight: 200, maxWidth: 8000, maxHeight: 8000 },
+  sponsors: { minWidth: 100, minHeight: 100, maxWidth: 4000, maxHeight: 4000 },
 };
 
 // ─── Magic bytes ──────────────────────────────────────────────

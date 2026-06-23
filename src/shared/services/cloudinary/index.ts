@@ -8,12 +8,14 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-export type UploadFolder = 'articles' | 'avatars' | 'banners';
+export type UploadFolder = 'articles' | 'avatars' | 'banners' | 'events' | 'sponsors';
 
 const TRANSFORMATIONS: Record<UploadFolder, object[]> = {
   articles: [{ width: 1200, height: 675, crop: 'fill', quality: 'auto', fetch_format: 'auto' }],
   avatars: [{ width: 200, height: 200, crop: 'fill', quality: 'auto', fetch_format: 'auto' }],
   banners: [{ width: 1920, height: 600, crop: 'fill', quality: 'auto', fetch_format: 'auto' }],
+  events: [{ width: 1200, height: 675, crop: 'fill', quality: 'auto', fetch_format: 'auto' }],
+  sponsors: [{ width: 400, height: 400, crop: 'pad', quality: 'auto', fetch_format: 'auto' }],
 };
 
 // ─── Extrai o public_id do Cloudinary a partir da URL ─────────
