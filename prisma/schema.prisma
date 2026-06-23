@@ -267,7 +267,59 @@ model SiteSettings {
   socialYoutube    String?
   googleAnalytics  String?
   footerText       String?
+  biography        String?
   updatedAt        DateTime @updatedAt
 
   @@map("site_settings")
+}
+
+// ============================================================
+// PATROCINADORES
+// ============================================================
+model Sponsor {
+  id          String   @id @default(uuid())
+  name        String
+  logoUrl     String
+  websiteUrl  String?
+  description String?
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("sponsors")
+}
+
+// ============================================================
+// EVENTOS
+// ============================================================
+model Event {
+  id          String       @id @default(uuid())
+  title       String
+  slug        String       @unique
+  description String
+  location    String?
+  startsAt    DateTime
+  endsAt      DateTime?
+  coverImage  String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  images      EventImage[]
+
+  @@map("events")
+}
+
+model EventImage {
+  id        String   @id @default(uuid())
+  url       String
+  alt       String?
+  caption   String?
+  order     Int      @default(0)
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@map("event_images")
 }

@@ -10,6 +10,8 @@ import { TagRepository } from '../modules/tags/tags.repository';
 import { BannerRepository } from '../modules/banners/banners.repository';
 import { MenuRepository } from '../modules/menu/menu.repository';
 import { SiteSettingsRepository } from '../modules/settings/settings.repository';
+import { SponsorRepository } from '../modules/sponsors/sponsors.repository';
+import { EventRepository } from '../modules/events/events.repository';
 
 // ─── Use Cases — Articles public ─────────────────────────────
 import { ListArticlesUseCase } from '../modules/articles/use-cases/list-articles.use-case';
@@ -38,6 +40,9 @@ import { MenuService } from '../modules/menu/menu.service';
 import { SettingsService } from '../modules/settings/settings.service';
 import { DashboardService } from '../modules/dashboard/dashboard.service';
 import { CategoryReportsService } from '../modules/articles/category-reports.service';
+import { SponsorService } from '../modules/sponsors/sponsors.service';
+import { EventService } from '../modules/events/events.service';
+import { LiveScoresService } from '../modules/live-scores/live-scores.service';
 
 // ─── Controllers ─────────────────────────────────────────────
 import { ArticlePublicController } from '../modules/articles/public/articles-public.controller';
@@ -52,10 +57,11 @@ import { SettingsController } from '../modules/settings/settings.controller';
 import { DashboardController } from '../modules/dashboard/dashboard.controller';
 import { CategoryReportsController } from '../modules/articles/category-reports.controller';
 import { LiveScoresController } from '../modules/live-scores/live-scores.controller';
-import { LiveScoresService } from '../modules/live-scores/live-scores.service';
+import { SponsorController } from '../modules/sponsors/sponsors.controller';
+import { EventController } from '../modules/events/events.controller';
 
 // ═══════════════════════════════════════════════════════════════
-// Repositórios (singleton — uma instância por processo)
+// Repositórios
 // ═══════════════════════════════════════════════════════════════
 const articlePublicRepo = new PrismaArticlePublicRepository();
 const articleAdminRepo = new PrismaArticleAdminRepository();
@@ -66,6 +72,8 @@ const tagRepo = new TagRepository();
 const bannerRepo = new BannerRepository();
 const menuRepo = new MenuRepository();
 const settingsRepo = new SiteSettingsRepository();
+const sponsorRepo = new SponsorRepository();
+const eventRepo = new EventRepository();
 
 // ═══════════════════════════════════════════════════════════════
 // Use Cases — Articles
@@ -98,6 +106,8 @@ const settingsService = new SettingsService(settingsRepo);
 const dashboardService = new DashboardService(articleAdminRepo, userRepo, categoryRepo);
 const categoryReportsService = new CategoryReportsService(articleAdminRepo);
 const liveScoresService = new LiveScoresService();
+const sponsorService = new SponsorService(sponsorRepo);
+const eventService = new EventService(eventRepo);
 
 // ═══════════════════════════════════════════════════════════════
 // Controllers
@@ -131,3 +141,5 @@ export const settingsController = new SettingsController(settingsService);
 export const dashboardController = new DashboardController(dashboardService);
 export const categoryReportsController = new CategoryReportsController(categoryReportsService);
 export const liveScoresController = new LiveScoresController(liveScoresService);
+export const sponsorController = new SponsorController(sponsorService);
+export const eventController = new EventController(eventService);

@@ -38,6 +38,9 @@ import { liveScoresRoutes } from './modules/live-scores';
 import { corinthiansRoutes } from './modules/corinthians';
 import { presenceRoutes } from './modules/presence/presence.routes';
 
+import { sponsorPublicRoutes, sponsorAdminRoutes } from './modules/sponsors/sponsors.routes';
+import { eventPublicRoutes, eventAdminRoutes } from './modules/events/events.routes';
+
 export async function buildApp() {
   const app = Fastify({
     logger: process.env.NODE_ENV !== 'test',
@@ -119,6 +122,8 @@ export async function buildApp() {
     await instance.register(settingsPublicRoutes);
     await instance.register(liveScoresRoutes, { prefix: '/live-scores' });
     await instance.register(corinthiansRoutes, { prefix: '/corinthians' });
+    await instance.register(sponsorPublicRoutes);
+    await instance.register(eventPublicRoutes);
   }, { prefix: '/api' });
 
   // ─── Rotas admin (requer autenticação) ────────────────────
@@ -135,6 +140,8 @@ export async function buildApp() {
     await instance.register(menuAdminRoutes);
     await instance.register(settingsAdminRoutes);
     await instance.register(presenceRoutes);
+    await instance.register(sponsorAdminRoutes);
+    await instance.register(eventAdminRoutes);
   }, { prefix: '/api/admin' });
 
   return app;

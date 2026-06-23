@@ -149,6 +149,7 @@ export interface SiteSettings {
   socialYoutube?: string | null;
   googleAnalytics?: string | null;
   footerText?: string | null;
+  biography?: string | null;
   updatedAt: Date;
 }
 
@@ -164,4 +165,40 @@ export interface PaginatedResult<T> {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+export interface Sponsor {
+  id: string;
+  name: string;
+  logoUrl: string;
+  websiteUrl?: string | null;
+  description?: string | null;
+  isActive: boolean;
+  order: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Event {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  location?: string | null;
+  startsAt: Date;
+  endsAt?: Date | null;
+  coverImage?: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface EventImage {
+  id: string;
+  url: string;
+  alt?: string | null;
+  caption?: string | null;
+  order: number;
+  eventId: string;
+  createdAt: Date;
 }

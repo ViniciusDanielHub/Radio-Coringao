@@ -19,7 +19,10 @@ export type Permission =
   | 'menu:manage'
   | 'menu:delete'
   | 'settings:manage'
-  | 'dashboard:view';
+  | 'dashboard:view'
+  | 'sponsors:manage'
+  | 'events:manage'
+  | 'biography:manage';
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   SUPER_ADMIN: [
@@ -32,6 +35,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'menu:manage', 'menu:delete',
     'settings:manage',
     'dashboard:view',
+    'sponsors:manage',
+    'events:manage',
+    'biography:manage',
   ],
   EDITOR_CHEFE: [
     'articles:create', 'articles:edit_own', 'articles:edit_any',
@@ -42,6 +48,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'menu:manage', 'menu:delete',
     'settings:manage',
     'dashboard:view',
+    'sponsors:manage',
+    'events:manage',
+    'biography:manage',
   ],
   EDITOR: [
     'articles:create', 'articles:edit_own', 'articles:edit_any',
@@ -51,6 +60,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'banners:manage',
     'menu:manage',
     'dashboard:view',
+    'events:manage',
+    'biography:manage',
   ],
   JORNALISTA:   ['articles:create', 'articles:edit_own', 'articles:submit', 'dashboard:view'],
   COLUNISTA:    ['articles:create', 'articles:edit_own', 'articles:submit', 'dashboard:view'],
